@@ -1,0 +1,15 @@
+target-version = "py38"
+exclude = ["backport", "src/dirt/backport/**/*"]
+force-exclude = true
+
+[format]
+line-ending = "lf"
+
+[lint]
+# Enable Docstring (`D`)
+extend-select = ["D"]
+
+extend-ignore = [
+  # undoc public module/class/method/functon/package/magic-method/nested-class/init
+  "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"
+]
