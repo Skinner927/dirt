@@ -2,7 +2,7 @@
 
 *Dirt is under development. Any claims in this README may not be implemented.*
 
-Dirt is a task runner designed for teams that work on multiple projects who
+Dirt is a task runner designed for developers that work on multiple projects who
 want to share common workflows with small augments at the project level.
 Dirt works with monorepos. It also
 targets older technologies for better support for
@@ -34,13 +34,20 @@ still supports decent typing support.
 ## Config
 
 Dirt has some internal options, but Tasks are also supposed to be configured.
-Most of the configuration will be done in the local `.dirt/dirt.ini` file. By
-default, all options can be configured from the command line, local, global, and
-user configuration files, and environment variables, but Task authors have the
-ability to forbid configuration from any of these mediums.
+Most of the configuration will be done in the local `dirt.ini` file which should
+be located at the root of the project. By
+default, all options can be configured from the command line, environment
+variables, and local, global, & user configuration files, but Task authors have
+the ability to forbid configuration from any of these mediums.
 
 Dirt keeps track of everywhere it got configuration from, and you may
 display the resolved configuration with the `--print-config` option.
+
+**Quick Notes! TODO: Make nicer**
+- `.ini` file supports `configparser.ExtendedInterpolation` so you can use
+  `${foo}` to reference different variables or `${section_name:foo}` to
+  reference variables in other sections.
+- `dirt.ini` can also be `.dirt.ini`
 
 ### Command line args
 
