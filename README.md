@@ -31,6 +31,15 @@ for now Python 3.8 is the target for faster development. Python 3.8 can target
 back to Windows 7 and Ubuntu 18.04 (wow, neither of those sound very old) and
 still supports decent typing support.
 
+## Execution
+
+1. User runs `dirt` which is a `console_scripts` to `dirt.__main__:main`
+2. `dirt.__main__:main` calls `dirt.cli.main:main`
+1. Find `dirt.ini`.
+2. Create venv.
+3. Install `tasks_package` into venv.
+4. Run `tasks_module`
+
 ## Config
 
 Dirt has some internal options, but Tasks are also supposed to be configured.

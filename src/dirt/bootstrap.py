@@ -103,26 +103,40 @@ class Bootstrapper:
             raise RuntimeError(f"Resolved dirt.ini is not a file: {dirt_ini_file_path}")
         self.log.debug("Found dirt.ini file at %s", dirt_ini_file_path)
 
-        # Create .gitignores if in a git repo
-        create_gitignore = bool(
-            self.search_path_for(dirt_ini_file_path, names=[".git"], kind="dir")
-        )
+        # Prepare the environment
+        self.prepare_environment(dirt_ini_file_path)
+
+    @classmethod
+    def prepare_environment(
+        cls,
+        dirt_ini_file_path: Path,
+        create_gitignore: Union[None, Literal[True, False]] = None,
+        create_parents: bool = False,
+    ) -> None:
+        # Function creates the directories and venv Dirt needs to run.
+        # This function will likely be useful for bootstrapping test directories
+        # thus all the options.
+        if create_gitignore is None:
+            # Create .gitignores if in a git repo
+            create_gitignore = not not cls.search_path_for(
+                dirt_ini_file_path.parent, names=[".git"], kind="dir"
+            )
 
         # Make .dirt directory for us to work in
-        dot_dirt = dirt_ini_file_path.parent / self.DIRT_DIR_NAME
-        created_dot_dirt_ignore = False
+        dot_dirt = dirt_ini_file_path.parent / cls.DIRT_DIR_NAME
+        created_dot_dirt_gitignore = False
         if not dot_dirt.is_dir():
-            dot_dirt.mkdir(parents=False, exist_ok=False)
+            dot_dirt.mkdir(parents=create_parents, exist_ok=False)
             if create_gitignore:
                 # Create .gitignore to ignore everything
                 (dot_dirt / ".gitignore").write_text("*\n!.gitignore\n")
-                created_dot_dirt_ignore = True
+                created_dot_dirt_gitignore = True
 
         # .dirt/venv is where all cached virtualenvs are stored
-        venv_dir = dot_dirt / self.VENV_DIR_NAME
+        venv_dir = dot_dirt / cls.VENV_DIR_NAME
         if not venv_dir.is_dir():
-            venv_dir.mkdir(parents=True, exist_ok=False)
-            if not created_dot_dirt_ignore and create_gitignore:
+            venv_dir.mkdir(parents=False, exist_ok=False)
+            if not created_dot_dirt_gitignore and create_gitignore:
                 # Create .gitignore to ignore everything
                 (venv_dir / ".gitignore").write_text("*\n!.gitignore\n")
 
