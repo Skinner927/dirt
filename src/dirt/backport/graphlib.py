@@ -1,9 +1,9 @@
-# This is a backport of graphlib from Python 3.9.
-# It's actually an exact copy of graphlib from Python 3.9
-# https://github.com/python/cpython/blob/3.9/Lib/graphlib.py
-# Commit 5482db5800d195d43d1e13e8c05e21c708dcfa50
+"""Backport of graphlib from Python 3.9.
 
-"""
+It's actually an exact copy of graphlib from Python 3.9
+https://github.com/python/cpython/blob/3.9/Lib/graphlib.py
+Commit 5482db5800d195d43d1e13e8c05e21c708dcfa50
+
 PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2
 --------------------------------------------
 
@@ -53,6 +53,8 @@ products or services of Licensee, or any third party.
 agrees to be bound by the terms and conditions of this License
 Agreement.
 """
+# @formatter:off
+# fmt: off
 
 __all__ = ["TopologicalSorter", "CycleError"]
 

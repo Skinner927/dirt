@@ -1,6 +1,7 @@
 # Stub from typeshed commit 33a62ae42d7a3a503d75013efed06e954415b48f
 # https://github.com/python/typeshed/blob/main/stdlib/graphlib.pyi
 # @formatter:off
+# fmt: off
 
 import sys
 from _typeshed import SupportsItems
