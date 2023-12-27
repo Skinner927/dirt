@@ -1,14 +1,4 @@
-import logging
-import sys
-
-import dirt.bootstrap
-
-
-def main():
-    boot = dirt.bootstrap.Bootstrapper()
-    boot.start(sys.argv)
-
+import dirt.cli.main
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    main()
+    dirt.cli.main.main()

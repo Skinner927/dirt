@@ -7,30 +7,81 @@ import subprocess
 import sys
 import venv
 from pathlib import Path
-from typing import Union, Optional, List, ClassVar, Set, Tuple
+from typing import (
+    ClassVar,
+    Collection,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
+from dirt import const
 from dirt.ini_parser import IniParser
+
+logger = const.child_logger(__name__)
 
 
 class Bootstrapper:
-    """Creates Dirt environments to run task projects."""
+    """Entry point for Dirt.
 
-    DIRT_INI: ClassVar[List[str]] = ["dirt.ini", ".dirt.ini"]
-    PY_REQUIREMENT_FILES: ClassVar[Set[str]] = {
+    1. Finds `dirt.ini`
+    2. Finds `tasks_module`
+    3. Creates venv (if needed)
+    4. Installs `tasks_module`
+    5. Runs Dirt.
+
+    `start()` is where the magic happens.
+    """
+
+    DIRT_INI_NAMES: ClassVar[Tuple[str, ...]] = ("dirt.ini", ".dirt.ini")
+    """Names of the dirt.ini files to search for.
+
+    First match wins.
+    """
+    PY_REQUIREMENT_FILES: ClassVar[Tuple[str, ...]] = (
         "setup.py",
         "setup.cfg",
         "pyproject.toml",
         "requirements.txt",
-    }
-    DEFAULT_TASKS_MODULES: ClassVar[List[str]] = [".dirt/tasks:tasks", "tasks:tasks"]
-    PY_EXE: ClassVar[List[str]] = ["python3", "python3.exe", "python", "python.exe"]
+    )
+    """Files used to hash a tasks_module project for changes.
 
-    log: ClassVar[logging.Logger] = logging.getLogger(f"{__name__}.Bootstrapper")
+    If these files are changed, the environment is re-created.
+    """
+    DIRT_DIR_NAME: ClassVar[str] = ".dirt"
+    """Working directory for Dirt."""
+    VENV_DIR_NAME: ClassVar[str] = "venv"
+    """Directory that stores all cached virtualenvs inside DIRT_DIR_NAME."""
+    DEFAULT_TASKS_MODULES: ClassVar[Tuple[str, ...]] = (
+        f"{DIRT_DIR_NAME}/tasks = tasks",
+        "tasks = tasks",
+    )
+    """If tasks_module is not set, these are the defaults to check.
 
-    def __init__(self, start_dir: Union[None, Path, str] = None) -> None:
+    Format: DIRECTORY_PATH = MODULE[:FUNCTION]
+    """
+    PY_EXE: ClassVar[Tuple[str, ...]] = (
+        "python3",
+        "python3.exe",
+        "python",
+        "python.exe",
+    )
+    """Python binaries to attempt to use in each venv."""
+
+    log: ClassVar[logging.Logger] = logger.getChild("Bootstrapper")
+
+    def __init__(
+        self, name: Optional[str] = None, *, start_dir: Union[None, Path, str] = None
+    ) -> None:
+        self.name: str = name or const.NAME
         self.start_dir: Path = Path(start_dir or os.getcwd())
 
-    def start(self, argv: Optional[List[str]] = None) -> None:
+    def start(self, argv: Optional[Sequence[str]] = None) -> None:
         """Search for dirt.ini, create any environments and run tasks.
 
         :param argv: Override default args from `sys.argv`.
@@ -41,22 +92,42 @@ class Bootstrapper:
             argv = sys.argv
 
         # Find dirt.ini
-        dirt_ini_path: Optional[Path] = self.find_dirt_ini(self.start_dir)
-        if not dirt_ini_path:
+        dirt_ini_file_path: Optional[Path] = self.search_path_for(
+            self.start_dir, names=self.DIRT_INI_NAMES, kind="file"
+        )
+        if not dirt_ini_file_path:
             raise RuntimeError(
                 f"Could not find dirt.ini file in {self.start_dir} and all parents"
             )
-        if not dirt_ini_path.is_file():
-            raise RuntimeError(f"Resolved dirt.ini is not a file: {dirt_ini_path}")
-        self.log.debug("Found dirt.ini file at %s", dirt_ini_path)
+        if not dirt_ini_file_path.is_file():
+            raise RuntimeError(f"Resolved dirt.ini is not a file: {dirt_ini_file_path}")
+        self.log.debug("Found dirt.ini file at %s", dirt_ini_file_path)
+
+        # Create .gitignores if in a git repo
+        create_gitignore = bool(
+            self.search_path_for(dirt_ini_file_path, names=[".git"], kind="dir")
+        )
 
         # Make .dirt directory for us to work in
-        dot_dirt = dirt_ini_path.parent / ".dirt"
-        dot_env = dot_dirt / ".env"
-        dot_env.mkdir(parents=True, exist_ok=True)
+        dot_dirt = dirt_ini_file_path.parent / self.DIRT_DIR_NAME
+        created_dot_dirt_ignore = False
+        if not dot_dirt.is_dir():
+            dot_dirt.mkdir(parents=False, exist_ok=False)
+            if create_gitignore:
+                # Create .gitignore to ignore everything
+                (dot_dirt / ".gitignore").write_text("*\n!.gitignore\n")
+                created_dot_dirt_ignore = True
+
+        # .dirt/venv is where all cached virtualenvs are stored
+        venv_dir = dot_dirt / self.VENV_DIR_NAME
+        if not venv_dir.is_dir():
+            venv_dir.mkdir(parents=True, exist_ok=False)
+            if not created_dot_dirt_ignore and create_gitignore:
+                # Create .gitignore to ignore everything
+                (venv_dir / ".gitignore").write_text("*\n!.gitignore\n")
 
         # Load dirt.ini
-        dirt_ini = IniParser(dirt_ini_path)
+        dirt_ini = IniParser(dirt_ini_file_path)
         # Find task_module
         pkg_path, mod_name = self.resolve_valid_task_module_path(dirt_ini)
         self.log.debug("pkg_path=%s mod_name=%s", pkg_path, mod_name)
@@ -64,7 +135,7 @@ class Bootstrapper:
         # Get the hash
         pkg_hash = self.hash_project_dir(pkg_path)
         # Dir that will exist if we don't believe there are changes
-        env_dir = dot_env / f"{pkg_path.name}-{mod_name}-{pkg_hash}"
+        env_dir = venv_dir / f"{pkg_path.name}-{mod_name}-{pkg_hash}"
         if not env_dir.is_dir():
             # Need to make the env
             venv.create(env_dir, with_pip=True, symlinks=("nt" != os.name))
@@ -80,27 +151,58 @@ class Bootstrapper:
         # TODO: track env hashes and purge old envs
 
     @classmethod
-    def find_dirt_ini(cls, start: Path) -> Optional[Path]:
-        """Walk up the directory tree looking for the first dirt.ini file.
+    def search_path_for(
+        cls,
+        start: Path,
+        *,
+        names: Collection[str],
+        kind: Optional[Literal["dir", "file"]] = None,
+        on_recursion: Optional[Literal["raise", "ignore"]] = "ignore",
+    ) -> Union[Path, None]:
+        """Walk directory tree from `start` to root looking for `names`.
 
-        :param start: Where to start searching
-        :return: None if not found
+        :param start: Where to start the search.
+        :param names: One or more items to find.
+        :param kind: Specify "file" or "dir" to limit search to specific types.
+         `None` only checks if it exists.
+        :param on_recursion: "raise" will raise a RecursionError if a loop in
+         the file system is detected. "ignore" or `None` will return `None.
+        :return: Found Path or `None` if not found. Returned path will be
+         resolved with `pathlib.resolve()` which makes the path
+         absolute, resolving all symlinks on the way and also normalizing it.
+        :raises: RecursionError if a loop in the file system is detected.
         """
-        seen = set()
-        current = start
-        while current:
+        if isinstance(names, str):
+            names = [names]
+        seen: Set[str] = set()
+        last: Optional[Path] = None
+        current: Optional[Path] = start.resolve()
+        while current and current != last:
+            last = current
+            current_str = str(current)
             # Check for loops
-            if current in seen:
-                raise RecursionError(f"Circular pathing detected: {current}")
-            seen.add(current)
+            if current_str in seen:
+                msg = f"{cls.search_path_for.__name__}() - circular pathing detected: {current}"
+                cls.log.debug(msg)
+                if "raise" == on_recursion:
+                    raise RecursionError(msg)
+                return None
+            seen.add(current_str)
 
             # Check for dirt.ini or .dirt.ini file
-            for ini_file in cls.DIRT_INI:
-                dirt_ini = current / ini_file
-                if dirt_ini.is_file():
-                    return dirt_ini.resolve()
+            for target_name in names:
+                target = current / target_name
+                if "dir" == kind:
+                    if target.is_dir():
+                        return target.resolve()
+                elif "file" == kind:
+                    if target.is_file():
+                        return target.resolve()
+                else:
+                    if target.exists():
+                        return target.resolve()
             # Crawl up
-            current = current.parent
+            current = current.parent.resolve()
         return None
 
     @staticmethod
@@ -137,7 +239,7 @@ class Bootstrapper:
         :return: Existing package directory and module name
         """
         pkg_path, mod_name = None, None
-        tried_modules: List[str] | str
+        tried_modules: Sequence[str] | str
 
         task_module_name = dirt_ini.dirt_task_module()
         if task_module_name is not None:
@@ -192,8 +294,8 @@ class Bootstrapper:
     def venv_run(
         cls,
         venv_dir: Path,
-        exe: str | List[str],
-        args: List[str],
+        exe: str | Sequence[str],
+        args: Sequence[str],
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         if not venv_dir.is_dir():
@@ -230,6 +332,8 @@ class Bootstrapper:
             if not use_exe:
                 use_exe = exe[0]
 
-        full_args = [use_exe, *args]
+        # -B: Don't write .pyc bytecode
+        full_args = [use_exe, "-B", *args]
         cls.log.debug("venv_run %s", full_args)
-        return subprocess.run(full_args, env=new_env, check=check)
+        r = subprocess.run(full_args, env=new_env, check=check)
+        return cast(subprocess.CompletedProcess[str], r)
