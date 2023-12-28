@@ -34,7 +34,11 @@ still supports decent typing support.
 ## Execution
 
 1. User runs `dirt` which is a `console_scripts` to `dirt.__main__:main`
-2. `dirt.__main__:main` calls `dirt.cli.main:main`
+2. `dirt.__main__:main` calls `dirt.bootstrap:bootstrap`
+3. bootstrap:
+  - Use passed `--config` for `dirt.ini` or search current directory & parents.
+  - Reads `tasks_package` path.
+  - Hashes
 1. Find `dirt.ini`.
 2. Create venv.
 3. Install `tasks_package` into venv.

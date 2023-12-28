@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import logging
 import os
@@ -20,10 +21,60 @@ from typing import (
     cast,
 )
 
+import dirt.utils
+import dirt.utils.fs
 from dirt import const
 from dirt.ini_parser import IniParser
 
-logger = const.child_logger(__name__)
+logger = logging.getLogger(__name__)
+
+
+def make_arg_parser(
+    what: bool = False,
+) -> argparse.ArgumentParser:
+    """Create the bootstrap ArgumentParser.
+
+    Use this parser as a `parents` parser for the real parser.
+    """
+    parser = argparse.ArgumentParser(add_help=False, **const.ARG_PARSE_KWARGS)
+    parser.add_argument(
+        "--config",
+        "-c",
+        help="Specify specific ini file to use. Default: %(default)",
+    )
+    return parser
+
+
+def bootstrap() -> None:
+    """Entrypoint for Dirt when invoked directly.
+
+    1. Find dirt.ini or use --config argument.
+    2. Create .dirt working dir relative to dirt.ini.
+    3. Read `tasks_package` and `tasks_pipeline` from `[dirt]` section of ini.
+    4. Hash key files in `tasks_package` for potential changes.
+    4. Create, re-create, or use existing virtualenv (venv) by hashing `tasks_package` for changes.
+    5. If
+    """
+    parser = make_arg_parser()
+    args = parser.parse_known_args()
+
+    origin = Path(os.getcwd()).resolve()
+    if args.config:
+        logger.debug("Bootstrapping with --config %s", args.config)
+        dirt_ini_file_path = Path(args.config).resolve()
+        if not dirt_ini_file_path.is_file():
+            raise RuntimeError(f"Specified config {dirt_ini_file_path} is not a file")
+    else:
+        logger.debug("Bootstrapping from dir %s", origin)
+        dirt_ini_file_path = dirt.utils.fs.find_walking_up(
+            origin, names=const.DEFAULT_DIRT_INI_FNAMES, kind="file"
+        )
+        if dirt_ini_file_path is None or not dirt_ini_file_path.is_file():
+            raise RuntimeError(
+                f"Could not find {const.DEFAULT_DIRT_INI_FNAMES} files "
+                f"in {origin} and all parent directories"
+            )
+        logger.debug("Found dirt.ini file %s", dirt_ini_file_path)
 
 
 class Bootstrapper:
