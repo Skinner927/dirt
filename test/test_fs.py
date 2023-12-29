@@ -160,6 +160,7 @@ def test_fs_find_down(tmp_path: Path) -> None:
     assert h2 in down2
     assert hd2 in down2
     assert hd2h1 in down2
+
     assert hd2f1 not in down2
 
     # Only hidden dirs

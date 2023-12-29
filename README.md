@@ -37,7 +37,7 @@ still supports decent typing support.
 2. `dirt.__main__:main` calls `dirt.bootstrap:bootstrap`
 3. bootstrap:
   - Use passed `--config` for `dirt.ini` or search current directory & parents.
-  - Reads `tasks_package` path.
+  - Reads `tasks_package` path.  (TODO: https://docs.python.org/3/library/pkgutil.html#pkgutil.resolve_name)
   - Hashes
 1. Find `dirt.ini`.
 2. Create venv.

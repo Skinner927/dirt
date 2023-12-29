@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import argparse
+import dataclasses
 import hashlib
 import logging
 import os
@@ -21,28 +21,25 @@ from typing import (
     cast,
 )
 
+import simple_parsing.utils
+
 import dirt.utils
 import dirt.utils.fs
 from dirt import const
+from dirt.args import AuditArgumentParser, field
 from dirt.ini_parser import IniParser
 
 logger = logging.getLogger(__name__)
 
 
-def make_arg_parser(
-    what: bool = False,
-) -> argparse.ArgumentParser:
-    """Create the bootstrap ArgumentParser.
-
-    Use this parser as a `parents` parser for the real parser.
-    """
-    parser = argparse.ArgumentParser(add_help=False, **const.ARG_PARSE_KWARGS)
-    parser.add_argument(
-        "--config",
-        "-c",
-        help="Specify specific ini file to use. Default: %(default)",
+@dataclasses.dataclass()
+class BootstrapConfig(simple_parsing.utils.Dataclass):
+    dest_: ClassVar[str] = "dirt"
+    # Specify specific dirt.ini file to use.
+    config: Optional[str] = field(
+        alias=["-c"], default=None, action="store", nargs=1, metavar="file"
     )
-    return parser
+    potato: str = "cheese"
 
 
 def bootstrap() -> None:
@@ -55,8 +52,11 @@ def bootstrap() -> None:
     4. Create, re-create, or use existing virtualenv (venv) by hashing `tasks_package` for changes.
     5. If
     """
-    parser = make_arg_parser()
-    args = parser.parse_known_args()
+    # Parse args
+    parser = AuditArgumentParser()
+    parser.add_arguments(BootstrapConfig, dest=BootstrapConfig.dest_)
+    all_args, _ = parser.parse_known_args()
+    args: BootstrapConfig = getattr(all_args, BootstrapConfig.dest_)
 
     origin = Path(os.getcwd()).resolve()
     if args.config:
@@ -143,7 +143,7 @@ class Bootstrapper:
             argv = sys.argv
 
         # Find dirt.ini
-        dirt_ini_file_path: Optional[Path] = self.search_path_for(
+        dirt_ini_file_path = self.search_path_for(
             self.start_dir, names=self.DIRT_INI_NAMES, kind="file"
         )
         if not dirt_ini_file_path:
@@ -194,21 +194,21 @@ class Bootstrapper:
         # Load dirt.ini
         dirt_ini = IniParser(dirt_ini_file_path)
         # Find task_module
-        pkg_path, mod_name = self.resolve_valid_task_module_path(dirt_ini)
-        self.log.debug("pkg_path=%s mod_name=%s", pkg_path, mod_name)
+        pkg_path, mod_name = cls.resolve_valid_task_module_path(dirt_ini)
+        cls.log.debug("pkg_path=%s mod_name=%s", pkg_path, mod_name)
 
         # Get the hash
-        pkg_hash = self.hash_project_dir(pkg_path)
+        pkg_hash = cls.hash_project_dir(pkg_path)
         # Dir that will exist if we don't believe there are changes
         env_dir = venv_dir / f"{pkg_path.name}-{mod_name}-{pkg_hash}"
         if not env_dir.is_dir():
             # Need to make the env
             venv.create(env_dir, with_pip=True, symlinks=("nt" != os.name))
-        self.log.debug("Creating venv %s", env_dir)
+        cls.log.debug("Creating venv %s", env_dir)
 
-        self.venv_run(
+        cls.venv_run(
             env_dir,
-            self.PY_EXE,
+            cls.PY_EXE,
             ["-m", "pip", "install", "-e", str(pkg_path.absolute())],
         )
         # self.venv_install_package(env_dir, pkg_path)

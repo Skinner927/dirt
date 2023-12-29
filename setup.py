@@ -10,9 +10,10 @@ setup(
         "console_scripts": ["dirt=dirt.__main__:main"],
     },
     install_requires=[
-        "nox==2023.4.22",
+        "nox~=2023.4.22",
+        "simple-parsing~=0.1.4"
     ],
     extras_require={
-        "test": ["pytest ~= 7.4.0"],
+        "test": ["pytest~=7.4.0"],
     },
 )
