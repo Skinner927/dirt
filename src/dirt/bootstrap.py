@@ -34,12 +34,10 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass()
 class BootstrapConfig(simple_parsing.utils.Dataclass):
-    dest_: ClassVar[str] = "dirt"
     # Specify specific dirt.ini file to use.
     config: Optional[str] = field(
         alias=["-c"], default=None, action="store", nargs=1, metavar="file"
     )
-    potato: str = "cheese"
 
 
 def bootstrap() -> None:
@@ -52,13 +50,18 @@ def bootstrap() -> None:
     4. Create, re-create, or use existing virtualenv (venv) by hashing `tasks_package` for changes.
     5. If
     """
-    # Parse args
-    parser = AuditArgumentParser()
-    parser.add_arguments(BootstrapConfig, dest=BootstrapConfig.dest_)
+    # Parse args for bootstrap options
+    parser = AuditArgumentParser(add_help=False)
+    parser.add_arguments(BootstrapConfig, dest="bootstrap")
     all_args, _ = parser.parse_known_args()
-    args: BootstrapConfig = getattr(all_args, BootstrapConfig.dest_)
+    args: BootstrapConfig = all_args.bootstrap
+
+    # TODO: Use prefix= to segment options
+    # TODO: Figure out how to incorporate env and config files?
+    # TODO: ENV variables like this: DIRT_CONF_0='--foo bar -vvv'
 
     origin = Path(os.getcwd()).resolve()
+    dirt_ini_file_path: Path
     if args.config:
         logger.debug("Bootstrapping with --config %s", args.config)
         dirt_ini_file_path = Path(args.config).resolve()
@@ -66,14 +69,15 @@ def bootstrap() -> None:
             raise RuntimeError(f"Specified config {dirt_ini_file_path} is not a file")
     else:
         logger.debug("Bootstrapping from dir %s", origin)
-        dirt_ini_file_path = dirt.utils.fs.find_walking_up(
+        tmp_path = dirt.utils.fs.find_walking_up(
             origin, names=const.DEFAULT_DIRT_INI_FNAMES, kind="file"
         )
-        if dirt_ini_file_path is None or not dirt_ini_file_path.is_file():
+        if tmp_path is None or not tmp_path.is_file():
             raise RuntimeError(
                 f"Could not find {const.DEFAULT_DIRT_INI_FNAMES} files "
                 f"in {origin} and all parent directories"
             )
+        dirt_ini_file_path = tmp_path
         logger.debug("Found dirt.ini file %s", dirt_ini_file_path)
 
 

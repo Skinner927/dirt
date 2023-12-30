@@ -186,3 +186,27 @@ def test_fs_find_down(tmp_path: Path) -> None:
     assert hd2 in down3
     assert hd2h1 not in down3
     assert hd2f1 not in down3
+
+
+def test_find_up_root(tmp_path):
+    fs_root = list(tmp_path.parents)[-1]
+    start = tmp_path
+    f1 = start / "inside"
+    f1.write_text("hello")
+
+    up = _assert_no_dupes(fs.find(start, down=False))
+    assert f1 in up
+    assert start in up
+    assert fs_root in up
+
+
+def test_find_down_start(tmp_path):
+    fs_root = list(tmp_path.parents)[-1]
+    start = tmp_path
+    f1 = start / "inside"
+    f1.write_text("hello")
+
+    up = _assert_no_dupes(fs.find(start, down=True))
+    assert f1 in up
+    assert start in up
+    assert fs_root not in up
