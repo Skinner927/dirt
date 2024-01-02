@@ -24,7 +24,7 @@ from typing import (
 import simple_parsing.utils
 
 import dirt.utils
-import dirt.utils.fs
+import dirt.utils.hash
 from dirt import const
 from dirt.args import AuditArgumentParser, field
 from dirt.ini_parser import IniParser

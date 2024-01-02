@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Set
 
-from dirt.utils import fs
+import dirt.utils.fs
 
 
 def _assert_no_dupes(paths: Iterable[Path], base: Path | None = None) -> Set[Path]:
@@ -48,7 +48,7 @@ def test_fs_find_up(tmp_path: Path) -> None:
     hd2f1 = hd2 / "legal.ini"
     hd2f1.write_text("legal hd2f1")
 
-    up1 = _assert_no_dupes(fs.find(d2, down=False), tmp_path)
+    up1 = _assert_no_dupes(dirt.utils.fs.find(d2, down=False), tmp_path)
 
     assert d1 in up1
     assert f1 in up1
@@ -65,7 +65,7 @@ def test_fs_find_up(tmp_path: Path) -> None:
 
     # Includes hidden
     up2 = _assert_no_dupes(
-        fs.find(d2, down=False, skip_hidden_dir=False, skip_hidden_file=False), tmp_path
+        dirt.utils.fs.find(d2, down=False, skip_hidden_dir=False, skip_hidden_file=False), tmp_path
     )
     assert d1 in up2
     assert f1 in up2
@@ -81,7 +81,7 @@ def test_fs_find_up(tmp_path: Path) -> None:
 
     # Only hidden files
     up3 = _assert_no_dupes(
-        fs.find(
+        dirt.utils.fs.find(
             d2,
             ".*",
             down=False,
@@ -132,7 +132,7 @@ def test_fs_find_down(tmp_path: Path) -> None:
     hd2f1 = hd2 / "legal.ini"
     hd2f1.write_text("legal hd2f1")
 
-    down1 = _assert_no_dupes(fs.find(d2, down=True), tmp_path)
+    down1 = _assert_no_dupes(dirt.utils.fs.find(d2, down=True), tmp_path)
     assert d1 not in down1
     assert f1 not in down1
     assert d2 in down1
@@ -147,7 +147,7 @@ def test_fs_find_down(tmp_path: Path) -> None:
 
     # Only hidden
     down2 = _assert_no_dupes(
-        fs.find(d2, ".*", down=True, skip_hidden_dir=False, skip_hidden_file=False),
+        dirt.utils.fs.find(d2, ".*", down=True, skip_hidden_dir=False, skip_hidden_file=False),
         tmp_path,
     )
     assert d1 not in down2
@@ -165,7 +165,7 @@ def test_fs_find_down(tmp_path: Path) -> None:
 
     # Only hidden dirs
     down3 = _assert_no_dupes(
-        fs.find(
+        dirt.utils.fs.find(
             d1,
             ".*",
             down=True,
@@ -194,7 +194,7 @@ def test_find_up_root(tmp_path):
     f1 = start / "inside"
     f1.write_text("hello")
 
-    up = _assert_no_dupes(fs.find(start, down=False))
+    up = _assert_no_dupes(dirt.utils.fs.find(start, down=False))
     assert f1 in up
     assert start in up
     assert fs_root in up
@@ -206,7 +206,7 @@ def test_find_down_start(tmp_path):
     f1 = start / "inside"
     f1.write_text("hello")
 
-    up = _assert_no_dupes(fs.find(start, down=True))
+    up = _assert_no_dupes(dirt.utils.fs.find(start, down=True))
     assert f1 in up
     assert start in up
     assert fs_root not in up
