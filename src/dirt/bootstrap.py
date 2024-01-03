@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import logging
 import os
+import re
 import subprocess
 import sys
 import venv
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import (
     ClassVar,
     Collection,
+    Final,
     List,
     Literal,
     Optional,
@@ -21,23 +22,33 @@ from typing import (
     cast,
 )
 
-import simple_parsing.utils
-
+import dirt.settings
 import dirt.utils
-import dirt.utils.hash
+import dirt.utils.fs
 from dirt import const
-from dirt.args import AuditArgumentParser, field
 from dirt.ini_parser import IniParser
 
 logger = logging.getLogger(__name__)
 
+_DIRT_INI_FNAMES_RE: Final[re.Pattern[str]] = re.compile(
+    f"(^|{re.escape(os.path.sep)})({'|'.join(re.escape(f) for f in const.DIRT_INI_FNAMES)})$"
+)
+_TASKS_PKG_HASH_EXTENSIONS_RE: Final[re.Pattern[str]] = re.compile(
+    f"\\.({'|'.join(re.escape(x) for x in const.TASKS_PKG_HASH_EXTENSIONS)})$"
+)
 
-@dataclasses.dataclass()
-class BootstrapConfig(simple_parsing.utils.Dataclass):
-    # Specify specific dirt.ini file to use.
-    config: Optional[str] = field(
-        alias=["-c"], default=None, action="store", nargs=1, metavar="file"
-    )
+
+# @dataclasses.dataclass()
+# class BootstrapConfig(simple_parsing.utils.Dataclass):
+#     # Specify specific dirt.ini file to use.
+#     config: Optional[str] = field(
+#         alias=["-c"],
+#         default=None,
+#         action="store",
+#         nargs=1,
+#         metavar="file",
+#         required=False,
+#     )
 
 
 def bootstrap() -> None:
@@ -50,17 +61,21 @@ def bootstrap() -> None:
     4. Create, re-create, or use existing virtualenv (venv) by hashing `tasks_package` for changes.
     5. If
     """
+    origin = Path(os.getcwd()).resolve()
+
     # Parse args for bootstrap options
-    parser = AuditArgumentParser(add_help=False)
-    parser.add_arguments(BootstrapConfig, dest="bootstrap")
-    all_args, _ = parser.parse_known_args()
-    args: BootstrapConfig = all_args.bootstrap
+    all_args, _ = dirt.settings.bootstrap_parse_args(origin=origin)
+    args: dirt.settings.Core = all_args
+
+    print(f"{args=}")
+    return
 
     # TODO: Use prefix= to segment options
     # TODO: Figure out how to incorporate env and config files?
     # TODO: ENV variables like this: DIRT_CONF_0='--foo bar -vvv'
 
-    origin = Path(os.getcwd()).resolve()
+    # Find dirt.ini
+
     dirt_ini_file_path: Path
     if args.config:
         logger.debug("Bootstrapping with --config %s", args.config)
@@ -69,16 +84,40 @@ def bootstrap() -> None:
             raise RuntimeError(f"Specified config {dirt_ini_file_path} is not a file")
     else:
         logger.debug("Bootstrapping from dir %s", origin)
-        tmp_path = dirt.utils.fs.find_walking_up(
-            origin, names=const.DEFAULT_DIRT_INI_FNAMES, kind="file"
-        )
-        if tmp_path is None or not tmp_path.is_file():
+        for file in dirt.utils.fs.find(
+            origin, _DIRT_INI_FNAMES_RE, down=False, kind="file"
+        ):
+            dirt_ini_file_path = file
+            break
+        else:
             raise RuntimeError(
-                f"Could not find {const.DEFAULT_DIRT_INI_FNAMES} files "
+                f"Could not find {const.DIRT_INI_FNAMES} files "
                 f"in {origin} and all parent directories"
             )
-        dirt_ini_file_path = tmp_path
         logger.debug("Found dirt.ini file %s", dirt_ini_file_path)
+
+    # TODO: Make .gitignore if not exists? Need to consider tasks_package
+    # Make .dirt/
+    dirt_dir = dirt_ini_file_path.parent / const.DOT_DIRT_NAME
+    dirt_dir.mkdir(parents=True, exist_ok=True)
+
+    # Read ini for tasks_project
+    ini = IniParser(dirt_ini_file_path)
+    tasks_project = ini.dirt_tasks_project(const.DEFAULT_TASKS_PROJECT)
+    tasks_main = ini.dirt_tasks_main(const.DEFAULT_TASKS_MAIN)
+
+    # try:
+    #     tasks_project_path = Path(tasks_project).resolve(strict=True)
+    #     if tasks_project_path.is_dir() or (tasks_project_path.is_file() and )
+
+    # Make .dirt/venv
+    venv_path = dirt_dir / const.VENV_DIR_NAME
+    venv_path.mkdir(parents=True, exist_ok=True)
+
+    # Make venv at .dirt/venv/main
+    main_venv = venv_path / "main"
+
+    venv_is_new = not venv_path.exists()
 
 
 class Bootstrapper:
@@ -133,7 +172,7 @@ class Bootstrapper:
     def __init__(
         self, name: Optional[str] = None, *, start_dir: Union[None, Path, str] = None
     ) -> None:
-        self.name: str = name or const.NAME
+        self.name: str = name or const.DEFAULT_PROG_NAME
         self.start_dir: Path = Path(start_dir or os.getcwd())
 
     def start(self, argv: Optional[Sequence[str]] = None) -> None:
@@ -310,7 +349,7 @@ class Bootstrapper:
         pkg_path, mod_name = None, None
         tried_modules: Sequence[str] | str
 
-        task_module_name = dirt_ini.dirt_task_module()
+        task_module_name = dirt_ini.dirt_tasks_project()
         if task_module_name is not None:
             # Try value from dirt.ini
             tried_modules = task_module_name

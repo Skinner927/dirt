@@ -37,12 +37,24 @@ still supports decent typing support.
 2. `dirt.__main__:main` calls `dirt.bootstrap:bootstrap`
 3. bootstrap:
   - Use passed `--config` for `dirt.ini` or search current directory & parents.
-  - Reads `tasks_package` path.  (TODO: https://docs.python.org/3/library/pkgutil.html#pkgutil.resolve_name)
-  - Hashes
-1. Find `dirt.ini`.
-2. Create venv.
-3. Install `tasks_package` into venv.
-4. Run `tasks_module`
+  - Reads `tasks_project` path from `dirt.ini`.  (TODO: https://docs.python.org/3/library/pkgutil.html#pkgutil.resolve_name)
+    - `tasks_project` is a path to a project that 
+  - Hashes all `.py`, `.ini`, `.cfg`, `.txt`, and `.toml` files in the `tasks_package` root.
+  - If a venv exists, but the hash is not the same, delete the venv.
+  - If a venv does not exist:
+    - Create one.
+    - Store the hash inside.
+    - Install `tasks_package` as a pip package into the venv.
+4. Using `tasks_module` from `dirt.ini`, invoke `dirt.cli <tasks_module>` from the venv.
+  - `dirt.cli` calls `dirt.cli.__main__`.
+
+
+TODO:
+- Create separate venvs based on the hash?
+  - Timestamp last used env so we can clean up old ones?
+    - Maybe cleanup is manual?
+    - Notify user when there's more than X old venvs?
+      - Do this after the task actually runs.
 
 ## Config
 

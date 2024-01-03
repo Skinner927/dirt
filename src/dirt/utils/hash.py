@@ -116,6 +116,19 @@ def hash_file(
 
 
 class HashPath:
+    """Hash a file or directory.
+
+    Use `hash_filenames()` and `hash_contents()` to retrieve hex digests, with
+    `hash_filenames()` being a less-expensive option.
+
+    When the HashPath object is created, a list of all files in the given path is
+    cached, which means `hash_filenames()` will never change and `hash_contents()` will
+    only hash the files that existed when HashPath was created.
+
+    The results from `hash_*` functions are cached so multiple calls will not change and
+    are not expensive.
+    """
+
     _hash_name: ClassVar[str] = "md5"
 
     def __init__(self, path: Path, buffer_size: int = 2**18) -> None:
@@ -128,6 +141,7 @@ class HashPath:
 
         Value comes from `hashlib.file_digest()`.
         """
+        self._sorted_filenames = self._get_sorted_filenames(self._path)
 
     @property
     def path(self) -> Path:
@@ -141,7 +155,7 @@ class HashPath:
         file contents, just all the file names.
         """
         digest = self._new_hash()
-        for item in self._get_sorted_filenames():
+        for item in self._sorted_filenames:
             digest.update(item.encode("utf-8"))
         return digest.hexdigest()
 
@@ -158,7 +172,7 @@ class HashPath:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             for file_digest in pool.map(
                 self._hash_contents_pool_worker,
-                self._get_sorted_filenames(),
+                self._sorted_filenames,
                 itertools.repeat(self._scratch_buffer_size),
             ):
                 hash_sum.update(file_digest)
@@ -166,6 +180,7 @@ class HashPath:
 
     @classmethod
     def _hash_contents_pool_worker(cls, file_name: str, buffer_size: int) -> bytes:
+        """Worker for hash_contents()."""
         tls = threading.local()
         # Init
         buf_view: Tuple[bytearray, memoryview]
@@ -188,6 +203,7 @@ class HashPath:
 
     @classmethod
     def _new_hash(cls) -> HASH:
+        # over-engineered
         while cls._hash_name is None:
             failed_algo = set()
             # Prefer MD5
@@ -202,21 +218,23 @@ class HashPath:
             raise RuntimeError(f"Failed to find working hash algorithms: {failed_algo}")
         return hashlib_new(cls._hash_name, usedforsecurity=False)
 
-    @functools.lru_cache()
-    def _get_sorted_filenames(self, skip_hidden: bool = True) -> List[str]:
+    @staticmethod
+    def _get_sorted_filenames(origin: Path, skip_hidden: bool = True) -> List[str]:
         """Return sorted list of all filenames in path.
 
-        Sorted to ensure no changes
+        Names are sorted to ensure no changes.
         """
-        if self._path.is_file():
-            return [str(self._path)]
+        if origin.is_file():
+            return [str(origin)]
         else:
             return sorted(
-                str(p.resolve())
-                for p in find(
-                    self._path,
-                    kind="file",
-                    skip_hidden_file=skip_hidden,
-                    skip_hidden_dir=skip_hidden,
+                set(
+                    str(p.resolve())
+                    for p in find(
+                        origin,
+                        kind="file",
+                        skip_hidden_file=skip_hidden,
+                        skip_hidden_dir=skip_hidden,
+                    )
                 )
             )

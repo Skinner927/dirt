@@ -11,7 +11,10 @@ setup(
     },
     install_requires=[
         "nox~=2023.4.22",
-        "simple-parsing~=0.1.4"
+        # "simple-parsing~=0.1.4",
+        "typed-settings[attrs,cattrs]~=23.1.1",
+        "attrs",
+        "cattrs",
     ],
     extras_require={
         "test": ["pytest~=7.4.0"],

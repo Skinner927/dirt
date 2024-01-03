@@ -1,27 +1,33 @@
 """Filesystem utility functions."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Iterable, List, Literal, Optional, Set
+from typing import Generator, List, Literal, Optional, Set, Union
 
 find_kind_t = Literal["file", "dir", "symlink", "fifo"]
 
-
+# TODO: Would be cool if find could return a special type that is Iterable
+#   but also has a .first() property to get the first item or None.
 def find(
     start_dir: Path | str,
-    glob_pattern: str = "*",
+    full_pattern: Union[None, re.Pattern[str], str] = None,
     *,
     down: bool = True,
     kind: Optional[Set[find_kind_t] | find_kind_t] = None,
     skip_hidden_dir: bool = True,
     skip_hidden_file: bool = True,
-) -> Iterable[Path]:
+) -> Generator[Path, None, None]:
     """Walk the path up/down and yield all files and/or dirs matching the pattern.
 
     :param start_dir: Directory where to start walking. If this is a file, its parent
         will be used.
-    :param glob_pattern: Specify glob to match against name of what will be yielded.
+    :param full_pattern: Specify regular expression to match against name of what
+        will be yielded. This compares the absolute path of the object and
+        uses `re.search` which allows for partial match. If you require full
+        matching, use RegExp `^` and `$` modifiers.
         This does not influence what directories will be traversed.
+        `None` ignores the pattern and allows everything (equivalent to `.*`).
     :param down: True to walk deeper down the file system. False to walk up the file
         system to root.
 
@@ -54,11 +60,14 @@ def find(
             return False
         return True
 
+    if isinstance(full_pattern, str):
+        full_pattern = re.compile(full_pattern)
+
     def can_yield(pp: Path, *, check_visibility: bool = True) -> bool:
         if check_visibility and not is_visible(pp):
             return False
         # Things we yield must match glob and kind
-        if not pp.match(glob_pattern):
+        if full_pattern is not None and full_pattern.search(str(pp)) is None:
             # Doesn't match the pattern
             return False
         if kind is not None and not any(getattr(pp, name)() for name in _kind_fns):
@@ -112,3 +121,5 @@ def find(
                     yield current
                 break
             current = parent
+
+    return None

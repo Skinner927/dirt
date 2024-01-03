@@ -285,7 +285,7 @@ class Runner:
         pkg_path, mod_name = None, None
         tried_modules: Sequence[str] | str
 
-        task_module_name = dirt_ini.dirt_task_module()
+        task_module_name = dirt_ini.dirt_tasks_project()
         if task_module_name is not None:
             # Try value from dirt.ini
             tried_modules = task_module_name
