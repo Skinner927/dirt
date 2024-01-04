@@ -10,6 +10,7 @@ setup(
         "console_scripts": ["dirt=dirt.__main__:main"],
     },
     install_requires=[
+        "typing_extensions~=4.9.0",
         "nox~=2023.4.22",
         # "simple-parsing~=0.1.4",
         "typed-settings[attrs,cattrs]~=23.1.1",

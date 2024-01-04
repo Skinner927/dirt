@@ -3,9 +3,28 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Generator, List, Literal, Optional, Set, Union
+from typing import Generator, List, Literal, Optional, Set, Union, Iterable
 
 find_kind_t = Literal["file", "dir", "symlink", "fifo"]
+
+def walk_up_find(
+    filenames: Iterable[str], start: Optional[Path] = None
+) -> Optional[Path]:
+    """Walk up from `start` to root, looking for `filenames`."""
+    if not isinstance(filenames, (list, tuple)):
+        filenames = tuple(filenames)
+
+    if start is None:
+        start = Path.cwd()
+    # Start needs to be a file because we iterate `.parents`
+    # (does not need to exist)
+    start = start.resolve() / filenames[0]
+    for path in start.parents:
+        for name in filenames:
+            p = path / name
+            if p.is_file():
+                return p.resolve()
+    return None
 
 # TODO: Would be cool if find could return a special type that is Iterable
 #   but also has a .first() property to get the first item or None.

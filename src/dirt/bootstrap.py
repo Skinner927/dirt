@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import subprocess
 import sys
 import venv
@@ -11,7 +10,6 @@ from pathlib import Path
 from typing import (
     ClassVar,
     Collection,
-    Final,
     List,
     Literal,
     Optional,
@@ -23,32 +21,44 @@ from typing import (
 )
 
 import dirt.settings
+import dirt.settings.parsing
 import dirt.utils
 import dirt.utils.fs
 from dirt import const
 from dirt.ini_parser import IniParser
+from dirt.settings.options import CoreOptions
+from dirt.settings.parsing import DirtArgParser
 
 logger = logging.getLogger(__name__)
 
-_DIRT_INI_FNAMES_RE: Final[re.Pattern[str]] = re.compile(
-    f"(^|{re.escape(os.path.sep)})({'|'.join(re.escape(f) for f in const.DIRT_INI_FNAMES)})$"
-)
-_TASKS_PKG_HASH_EXTENSIONS_RE: Final[re.Pattern[str]] = re.compile(
-    f"\\.({'|'.join(re.escape(x) for x in const.TASKS_PKG_HASH_EXTENSIONS)})$"
-)
 
+def _parse_core_options() -> Tuple[CoreOptions, DirtArgParser]:
+    parser = DirtArgParser()
+    parser.add_arguments(CoreOptions, dest=CoreOptions.key_, prefix="")
+    known_args, _ = parser.parse_known_args()
+    core_settings: CoreOptions = getattr(known_args, CoreOptions.key_)
+    return core_settings, parser
 
-# @dataclasses.dataclass()
-# class BootstrapConfig(simple_parsing.utils.Dataclass):
-#     # Specify specific dirt.ini file to use.
-#     config: Optional[str] = field(
-#         alias=["-c"],
-#         default=None,
-#         action="store",
-#         nargs=1,
-#         metavar="file",
-#         required=False,
-#     )
+def _find_root_dirt_ini(origin: Path, core_options: CoreOptions) -> Path:
+    """Return the resolved `dirt.ini` file or raise `FileNotFoundError`."""
+    if core_options.config:
+        # User passed a config file path, ensure it's legit
+        try:
+            return Path(core_options.config).resolve(strict=True)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"File path set with --config `{core_options.config!s}` does not exist"
+            )
+    else:
+        # Search for the config
+        if found := dirt.utils.fs.walk_up_find(const.DIRT_INI_FNAMES, origin):
+            try:
+                return found.resolve(strict=True)
+            except FileNotFoundError:
+                pass
+        raise FileNotFoundError(
+            f"Failed to find {const.DIRT_INI_FNAMES} in '{origin!s}' and parents"
+        )
 
 
 def bootstrap() -> None:
@@ -62,12 +72,15 @@ def bootstrap() -> None:
     5. If
     """
     origin = Path(os.getcwd()).resolve()
-
-    # Parse args for bootstrap options
-    all_args, _ = dirt.settings.bootstrap_parse_args(origin=origin)
-    args: dirt.settings.Core = all_args
-
-    print(f"{args=}")
+    core_options, parser = _parse_core_options()
+    try:
+        # Find the ini file to use
+        dirt_ini = _find_root_dirt_ini(origin, core_options)
+        print(f"Done: {dirt_ini}")
+    finally:
+        if core_options.help:
+            parser.print_help()
+        print(f"{core_options}")
     return
 
     # TODO: Use prefix= to segment options
