@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional, Union
 
-
+# TODO: I don't think I need this as `arg_path_type` in settings.fields works.
 class PathOptionalAction(argparse.Action):
     def __init__(
         self,

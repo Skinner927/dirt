@@ -35,5 +35,7 @@ class CoreOptions(DirtOptionBase):
     # )
 
     config: Optional[Path] = fields.file_path(
-        default=None, help="specify specific dirt.ini file to use"
+        default=None,
+        help="specify specific dirt.ini file to use",
+        ensure_path="file",
     )

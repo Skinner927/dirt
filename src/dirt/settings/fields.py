@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import functools
 from pathlib import Path
-from typing import Any, Literal, Optional, TypeVar, Union, overload, Callable, Type
+from argparse import ArgumentTypeError
+from typing import Any, Callable, Literal, Optional, Type, TypeVar, Union, overload
 
 import simple_parsing.helpers.fields
-
-from dirt.settings.actions import PathOptionalAction
 
 try:
     from simple_parsing.helpers.fields import _MISSING_TYPE, MISSING
@@ -40,6 +38,48 @@ subparsers = simple_parsing.helpers.fields.subparsers
 flag = simple_parsing.helpers.fields.flag
 
 
+def arg_path_type(
+    ensure_path: Literal["exists", "dir", "file"] | None = None
+) -> Callable[[str], Path]:
+    def path_type(value: str) -> Path:
+        path_val: Path
+        if isinstance(value, str):
+            if not value:
+                raise ArgumentTypeError("Cannot convert empty string to Path")
+            path_val = Path(value).expanduser()
+        elif isinstance(value, Path):
+            path_val = value
+        else:
+            raise ArgumentTypeError(f"Unsupported type passed to Path type: {type(value)}")
+
+        if not ensure_path:
+            return path_val.resolve()
+
+        # Ensure resolves to an existing path
+        try:
+            path_val = path_val.resolve(strict=True)
+        except PermissionError:
+            raise ArgumentTypeError(f"Invalid permissions for Path '{path_val}'")
+        except (FileNotFoundError, OSError):
+            raise ArgumentTypeError(f"Path '{path_val}' does not exist")
+
+        if "exists" == ensure_path:
+            return path_val
+        if "dir" == ensure_path:
+            if path_val.is_dir():
+                return path_val
+            raise ArgumentTypeError(f"Path {path_val} is not a directory")
+        if "file" == ensure_path:
+            if path_val.is_file():
+                return path_val
+            raise ArgumentTypeError(f"Path {path_val} is not a file")
+
+        raise ArgumentTypeError(f"Unknown {ensure_path=} for Path type")
+
+    path_type.__name__ = "Path"
+    return path_type
+
+
 _file_path_defaults = dict(init=True, repr=True, hash=True, compare=True)
 
 
@@ -51,7 +91,7 @@ def file_path(
     cmd: bool = True,
     positional: bool = False,
     ensure_path: None = None,
-    action: ActionCls | None = None,
+    type: Callable[[str], Path] | None = None,
     **kwargs: Any,
 ) -> Optional[Path]:
     ...
@@ -65,7 +105,7 @@ def file_path(
     cmd: bool = True,
     positional: bool = False,
     ensure_path: Literal["exists", "dir", "file"],
-    action: None = None,
+    type: Callable[[str], Path] | None = None,
     **kwargs: Any,
 ) -> Path:
     ...
@@ -79,7 +119,7 @@ def file_path(
     cmd: bool = True,
     positional: bool = False,
     ensure_path: Literal["exists", "dir", "file"] | None = None,
-    action: ActionCls | None = None,
+    type: Callable[[str], Path] | None = None,
     **kwargs: Any,
 ) -> Path:
     ...
@@ -92,7 +132,7 @@ def file_path(
     cmd: bool = True,
     positional: bool = False,
     ensure_path: Literal["exists", "dir", "file"] | None = None,
-    action: ActionCls | None = None,
+    type: Callable[[str], Path] | None = None,
     **kwargs: Any,
 ) -> FpT:
     # Defaults that I don't care to add to args
@@ -100,19 +140,15 @@ def file_path(
         if key not in kwargs:
             kwargs[key] = val
 
-    if ensure_path:
-        if action is not None:
-            raise ValueError("'ensure_path' cannot be set if 'action' is also set")
-        action = functools.partial(PathOptionalAction, ensure_path=ensure_path)
-    elif action is None:
-        action = PathOptionalAction
+    if type is None:
+        type = arg_path_type(ensure_path)
 
     return field(
         default=default,
         alias=alias,
         cmd=cmd,
         positional=positional,
-        action=action,
+        type=type,
         to_dict=True,
         encoding_fn=lambda pp: str(pp) if pp else None,
         decoding_fn=lambda aa: Path(aa).resolve() if aa else None,

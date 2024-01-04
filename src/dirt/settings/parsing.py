@@ -40,7 +40,6 @@ class DirtArgParser(ArgumentParser):
         argument_generation_mode=ArgumentGenerationMode.FLAT,
         nested_mode: NestedMode = NestedMode.DEFAULT,
         # Was simple_parsing.SimpleHelpFormatter
-        # But I hated that it showed [default: ] on boolean (store_true) flags.
         formatter_class: type[HelpFormatter] = StupidHelpFormatter,
         add_config_path_arg: bool | None = None,
         config_path: Path | str | Sequence[Path | str] | None = None,
