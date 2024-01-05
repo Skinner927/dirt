@@ -8,11 +8,11 @@ import io
 import itertools
 import logging
 import os
-import sys
 import threading
 from pathlib import Path
 from typing import BinaryIO, ClassVar, List, Optional, Protocol, Tuple
 
+from dirt import const
 from dirt.utils.fs import find
 
 
@@ -34,7 +34,7 @@ class InvalidHashError(Exception):
 
 # Forward compat
 def hashlib_new(algo: str, usedforsecurity: bool = True) -> "HASH":
-    if sys.version_info >= (3, 9, 0):
+    if const.PY_GE_39:
         return hashlib.new(algo, usedforsecurity=usedforsecurity)  # type: ignore
     return hashlib.new(algo)
 
@@ -147,7 +147,7 @@ class HashPath:
     def path(self) -> Path:
         return self._path
 
-    @functools.lru_cache()
+    @functools.lru_cache(None)
     def hash_filenames(self) -> str:
         """Hash of all the file names in the path.
 
@@ -159,7 +159,7 @@ class HashPath:
             digest.update(item.encode("utf-8"))
         return digest.hexdigest()
 
-    @functools.lru_cache()
+    @functools.lru_cache(None)
     def hash_contents(self) -> str:
         """Hash all files and their contents in the path.
 

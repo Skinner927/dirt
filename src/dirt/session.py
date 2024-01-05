@@ -5,27 +5,35 @@ import logging
 import os
 import re
 import subprocess
-import sys
-import venv
 from pathlib import Path
-from typing import (
-    ClassVar,
-    Collection,
-    List,
-    Literal,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-    cast,
-)
+from typing import ClassVar, List, Optional, Sequence, Tuple, TypeVar, cast
 
+from dirt import const
 from dirt.ini_parser import IniParser
+from dirt.utils import fix
+
+T = TypeVar("T")
 
 
 class Session:
-    pass
+    def __init__(self, *, origin: Path, dirt_ini: Path) -> None:
+        self.origin = origin
+        self.dirt_ini = dirt_ini.resolve(True)
+        self.ini = IniParser(self.dirt_ini)
+
+    @fix.cached_property
+    def dirt_dir(self) -> Path:
+        # Make .dirt/ relative to dirt.ini
+        dirt_dir = self.dirt_ini.parent / const.DOT_DIRT_NAME
+        dirt_dir.mkdir(parents=True, exist_ok=True)
+        return dirt_dir
+
+    @fix.cached_property
+    def venv_dir(self) -> Path:
+        # Make .dirt/venv
+        venv_dir = self.dirt_dir / const.VENV_DIR_NAME
+        venv_dir.mkdir(parents=True, exist_ok=True)
+        return venv_dir
 
 
 class Runner:
@@ -84,170 +92,169 @@ class Runner:
     def lower_sanitized_name(name: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_.]", "_", name.lower())
 
-    @classmethod
-    def bootstrap(cls, name: str, start_dir: Union[None, Path, str] = None) -> Runner:
-        """Create a Runner by searching current dir and up for dirt.ini.
+    # @classmethod
+    # def bootstrap(cls, name: str, start_dir: Union[None, Path, str] = None) -> Runner:
+    #     """Create a Runner by searching current dir and up for dirt.ini.
+    #
+    #     :param name:
+    #     :param start_dir:
+    #     :return:
+    #     """
+    #     start: Path = Path(start_dir or os.getcwd())
+    #     lower_name = cls.lower_sanitized_name(name)
+    #
+    #     log = logging.getLogger(lower_name)
+    #     log.debug("Starting bootstrap @ %s", start)
+    #
+    #     # Find dirt.ini
+    #     ini_files = (f"{lower_name}.ini", f".{lower_name}.ini")
+    #     dirt_ini_file_path: Optional[Path] = cls.search_path_for(
+    #         start, names=ini_files, kind="file"
+    #     )
+    #     if not dirt_ini_file_path:
+    #         raise RuntimeError(
+    #             f"Could not find {ini_files} files in {start} and all parents"
+    #         )
+    #     log.debug("Found dirt.ini file @ %s", dirt_ini_file_path)
+    #
+    #     return cls(
+    #         name=name,
+    #         dirt_ini_file_path=dirt_ini_file_path,
+    #         invoked_path=start,
+    #         logger=log,
+    #     )
 
-        :param name:
-        :param start_dir:
-        :return:
-        """
-        start: Path = Path(start_dir or os.getcwd())
-        lower_name = cls.lower_sanitized_name(name)
+    # def run(self, argv: Optional[Sequence[str]] = None):
+    #     """Create any venvs and run tasks.
+    #
+    #     :param argv: Override default args from `sys.argv`.
+    #     """
+    #     self.log.debug("Run   if argv is None:
+    #         # Use sys args by default
+    #         argv = sys.argv
+    #
+    #     # Create needed dirs.
+    #     self.create_session(self.dirt_init_file_path)
 
-        log = logging.getLogger(lower_name)
-        log.debug("Starting bootstrap @ %s", start)
-
-        # Find dirt.ini
-        ini_files = (f"{lower_name}.ini", f".{lower_name}.ini")
-        dirt_ini_file_path: Optional[Path] = cls.search_path_for(
-            start, names=ini_files, kind="file"
-        )
-        if not dirt_ini_file_path:
-            raise RuntimeError(
-                f"Could not find {ini_files} files in {start} and all parents"
-            )
-        log.debug("Found dirt.ini file @ %s", dirt_ini_file_path)
-
-        return cls(
-            name=name,
-            dirt_ini_file_path=dirt_ini_file_path,
-            invoked_path=start,
-            logger=log,
-        )
-
-    def run(self, argv: Optional[Sequence[str]] = None):
-        """Create any venvs and run tasks.
-
-        :param argv: Override default args from `sys.argv`.
-        """
-        self.log.debug("Runner.run()")
-        if argv is None:
-            # Use sys args by default
-            argv = sys.argv
-
-        # Create needed dirs.
-        self.create_session(self.dirt_init_file_path)
-
-    @classmethod
-    def create_session(
-        cls,
-        dirt_ini_file_path: Path,
-        create_gitignore: Union[None, Literal[True, False]] = None,
-        create_parents: bool = False,
-    ) -> Session:
-        """Create the directories and venv Dirt needs to run.
-
-        This function will likely be useful for bootstrapping test directories
-        thus it's static and all the options.
-
-        :param dirt_ini_file_path:
-        :param create_gitignore: `None` will determine if dirt.ini is in a git repo.
-        :param create_parents: Should parent directories be created?
-        :return:
-        """
-        if create_gitignore is None:
-            # Create .gitignores if in a git repo
-            create_gitignore = not not cls.search_path_for(
-                dirt_ini_file_path.parent, names=[".git"], kind="dir"
-            )
-
-        # Make .dirt directory for us to work in
-        dot_dirt = dirt_ini_file_path.parent / cls.DIRT_DIR_NAME
-        created_dot_dirt_gitignore = False
-        if not dot_dirt.is_dir():
-            dot_dirt.mkdir(parents=create_parents, exist_ok=False)
-            if create_gitignore:
-                # Create .gitignore to ignore everything
-                (dot_dirt / ".gitignore").write_text("*\n!.gitignore\n")
-                created_dot_dirt_gitignore = True
-
-        # .dirt/venv is where all cached virtualenvs are stored
-        venv_dir = dot_dirt / cls.VENV_DIR_NAME
-        if not venv_dir.is_dir():
-            venv_dir.mkdir(parents=False, exist_ok=False)
-            if not created_dot_dirt_gitignore and create_gitignore:
-                # Create .gitignore to ignore everything
-                (venv_dir / ".gitignore").write_text("*\n!.gitignore\n")
-
-        # Load dirt.ini
-        dirt_ini = IniParser(dirt_ini_file_path)
-        # Find task_module
-        pkg_path, mod_name = self.resolve_valid_task_module_path(dirt_ini)
-        self.log.debug("pkg_path=%s mod_name=%s", pkg_path, mod_name)
-
-        # Get the hash
-        pkg_hash = self.hash_project_dir(pkg_path)
-        # Dir that will exist if we don't believe there are changes
-        env_dir = venv_dir / f"{pkg_path.name}-{mod_name}-{pkg_hash}"
-        if not env_dir.is_dir():
-            # Need to make the env
-            venv.create(env_dir, with_pip=True, symlinks=("nt" != os.name))
-        self.log.debug("Creating venv %s", env_dir)
-
-        self.venv_run(
-            env_dir,
-            self.PY_EXE,
-            ["-m", "pip", "install", "-e", str(pkg_path.absolute())],
-        )
-        # self.venv_install_package(env_dir, pkg_path)
-
-        # TODO: track env hashes and purge old envs
-
-    @classmethod
-    def search_path_for(
-        cls,
-        start: Path,
-        *,
-        names: Collection[str],
-        kind: Optional[Literal["dir", "file"]] = None,
-        on_recursion: Optional[Literal["raise", "ignore"]] = "ignore",
-    ) -> Union[Path, None]:
-        """Walk directory tree from `start` to root looking for `names`.
-
-        :param start: Where to start the search.
-        :param names: One or more items to find.
-        :param kind: Specify "file" or "dir" to limit search to specific types.
-         `None` only checks if it exists.
-        :param on_recursion: "raise" will raise a RecursionError if a loop in
-         the file system is detected. "ignore" or `None` will return `None.
-        :return: Found Path or `None` if not found. Returned path will be
-         resolved with `pathlib.resolve()` which makes the path
-         absolute, resolving all symlinks on the way and also normalizing it.
-        :raises: RecursionError if a loop in the file system is detected.
-        """
-        if isinstance(names, str):
-            names = [names]
-        seen: Set[str] = set()
-        last: Optional[Path] = None
-        current: Optional[Path] = start.resolve()
-        while current and current != last:
-            last = current
-            current_str = str(current)
-            # Check for loops
-            if current_str in seen:
-                msg = f"{cls.search_path_for.__name__}() - circular pathing detected: {current}"
-                cls.log.debug(msg)
-                if "raise" == on_recursion:
-                    raise RecursionError(msg)
-                return None
-            seen.add(current_str)
-
-            # Check for dirt.ini or .dirt.ini file
-            for target_name in names:
-                target = current / target_name
-                if "dir" == kind:
-                    if target.is_dir():
-                        return target.resolve()
-                elif "file" == kind:
-                    if target.is_file():
-                        return target.resolve()
-                else:
-                    if target.exists():
-                        return target.resolve()
-            # Crawl up
-            current = current.parent.resolve()
-        return None
+    # @classmethod
+    # def create_session(
+    #     cls,
+    #     dirt_ini_file_path: Path,
+    #     create_gitignore: Union[None, Literal[True, False]] = None,
+    #     create_parents: bool = False,
+    # ) -> Session:
+    #     """Create the directories and venv Dirt needs to run.
+    #
+    #     This function will likely be useful for bootstrapping test directories
+    #     thus it's static and all the options.
+    #
+    #     :param dirt_ini_file_path:
+    #     :param create_gitignore: `None` will determine if dirt.ini is in a git repo.
+    #     :param create_parents: Should parent directories be created?
+    #     :return:
+    #     """
+    #     if create_gitignore is None:
+    #         # Create .gitignores if in a git repo
+    #         create_gitignore = not not cls.search_path_for(
+    #             dirt_ini_file_path.parent, names=[".git"], kind="dir"
+    #         )
+    #
+    #     # Make .dirt directory for us to work in
+    #     dot_dirt = dirt_ini_file_path.parent / cls.DIRT_DIR_NAME
+    #     created_dot_dirt_gitignore = False
+    #     if not dot_dirt.is_dir():
+    #         dot_dirt.mkdir(parents=create_parents, exist_ok=False)
+    #         if create_gitignore:
+    #             # Create .gitignore to ignore everything
+    #             (dot_dirt / ".gitignore").write_text("*\n!.gitignore\n")
+    #             created_dot_dirt_gitignore = True
+    #
+    #     # .dirt/venv is where all cached virtualenvs are stored
+    #     venv_dir = dot_dirt / cls.VENV_DIR_NAME
+    #     if not venv_dir.is_dir():
+    #         venv_dir.mkdir(parents=False, exist_ok=False)
+    #         if not created_dot_dirt_gitignore and create_gitignore:
+    #             # Create .gitignore to ignore everything
+    #             (venv_dir / ".gitignore").write_text("*\n!.gitignore\n")
+    #
+    #     # Load dirt.ini
+    #     dirt_ini = IniParser(dirt_ini_file_path)
+    #     # Find task_module
+    #     pkg_path, mod_name = self.resolve_valid_task_module_path(dirt_ini)
+    #     self.log.debug("pkg_path=%s mod_name=%s", pkg_path, mod_name)
+    #
+    #     # Get the hash
+    #     pkg_hash = self.hash_project_dir(pkg_path)
+    #     # Dir that will exist if we don't believe there are changes
+    #     env_dir = venv_dir / f"{pkg_path.name}-{mod_name}-{pkg_hash}"
+    #     if not env_dir.is_dir():
+    #         # Need to make the env
+    #         venv.create(env_dir, with_pip=True, symlinks=("nt" != os.name))
+    #     self.log.debug("Creating venv %s", env_dir)
+    #
+    #     self.venv_run(
+    #         env_dir,
+    #         self.PY_EXE,
+    #         ["-m", "pip", "install", "-e", str(pkg_path.absolute())],
+    #     )
+    #     # self.venv_install_package(env_dir, pkg_path)
+    #
+    #     # TODO: track env hashes and purge old envs
+    #
+    # @classmethod
+    # def search_path_for(
+    #     cls,
+    #     start: Path,
+    #     *,
+    #     names: Collection[str],
+    #     kind: Optional[Literal["dir", "file"]] = None,
+    #     on_recursion: Optional[Literal["raise", "ignore"]] = "ignore",
+    # ) -> Union[Path, None]:
+    #     """Walk directory tree from `start` to root looking for `names`.
+    #
+    #     :param start: Where to start the search.
+    #     :param names: One or more items to find.
+    #     :param kind: Specify "file" or "dir" to limit search to specific types.
+    #      `None` only checks if it exists.
+    #     :param on_recursion: "raise" will raise a RecursionError if a loop in
+    #      the file system is detected. "ignore" or `None` will return `None.
+    #     :return: Found Path or `None` if not found. Returned path will be
+    #      resolved with `pathlib.resolve()` which makes the path
+    #      absolute, resolving all symlinks on the way and also normalizing it.
+    #     :raises: RecursionError if a loop in the file system is detected.
+    #     """
+    #     if isinstance(names, str):
+    #         names = [names]
+    #     seen: Set[str] = set()
+    #     last: Optional[Path] = None
+    #     current: Optional[Path] = start.resolve()
+    #     while current and current != last:
+    #         last = current
+    #         current_str = str(current)
+    #         # Check for loops
+    #         if current_str in seen:
+    #             msg = f"{cls.search_path_for.__name__}() - circular pathing detected: {current}"
+    #             cls.log.debug(msg)
+    #             if "raise" == on_recursion:
+    #                 raise RecursionError(msg)
+    #             return None
+    #         seen.add(current_str)
+    #
+    #         # Check for dirt.ini or .dirt.ini file
+    #         for target_name in names:
+    #             target = current / target_name
+    #             if "dir" == kind:
+    #                 if target.is_dir():
+    #                     return target.resolve()
+    #             elif "file" == kind:
+    #                 if target.is_file():
+    #                     return target.resolve()
+    #             else:
+    #                 if target.exists():
+    #                     return target.resolve()
+    #         # Crawl up
+    #         current = current.parent.resolve()
+    #     return None
 
     @staticmethod
     def split_task_module(
@@ -274,37 +281,37 @@ class Runner:
         # Success
         return path.resolve(), mod_str
 
-    @classmethod
-    def resolve_valid_task_module_path(cls, dirt_ini: IniParser) -> Tuple[Path, str]:
-        """Resolve a valid task package path and module name.
-
-        :param dirt_ini:
-        :raises RuntimeError: If package path is invalid
-        :return: Existing package directory and module name
-        """
-        pkg_path, mod_name = None, None
-        tried_modules: Sequence[str] | str
-
-        task_module_name = dirt_ini.dirt_tasks_project()
-        if task_module_name is not None:
-            # Try value from dirt.ini
-            tried_modules = task_module_name
-            pkg_path, mod_name = cls.split_task_module(task_module_name)
-        else:
-            # Try defaults
-            tried_modules = cls.DEFAULT_TASKS_MODULES
-            for task_module_name in cls.DEFAULT_TASKS_MODULES:
-                pkg_path, mod_name = cls.split_task_module(task_module_name)
-                if pkg_path and mod_name:
-                    break
-
-        # Validate
-        if not pkg_path or not mod_name:
-            raise RuntimeError(
-                f"Failed to find module {tried_modules} from {IniParser.TASK_MODULE} in dirt.ini {dirt_ini.filename}"
-            )
-
-        return pkg_path, mod_name
+    # @classmethod
+    # def resolve_valid_task_module_path(cls, dirt_ini: IniParser) -> Tuple[Path, str]:
+    #     """Resolve a valid task package path and module name.
+    #
+    #     :param dirt_ini:
+    #     :raises RuntimeError: If package path is invalid
+    #     :return: Existing package directory and module name
+    #     """
+    #     pkg_path, mod_name = None, None
+    #     tried_modules: Sequence[str] | str
+    #
+    #     task_module_name = dirt_ini.dirt_tasks_project()
+    #     if task_module_name is not None:
+    #         # Try value from dirt.ini
+    #         tried_modules = task_module_name
+    #         pkg_path, mod_name = cls.split_task_module(task_module_name)
+    #     else:
+    #         # Try defaults
+    #         tried_modules = cls.DEFAULT_TASKS_MODULES
+    #         for task_module_name in cls.DEFAULT_TASKS_MODULES:
+    #             pkg_path, mod_name = cls.split_task_module(task_module_name)
+    #             if pkg_path and mod_name:
+    #                 break
+    #
+    #     # Validate
+    #     if not pkg_path or not mod_name:
+    #         raise RuntimeError(
+    #             f"Failed to find module {tried_modules} from {IniParser.TASK_MODULE} in dirt.ini {dirt_ini.filename}"
+    #         )
+    #
+    #     return pkg_path, mod_name
 
     @classmethod
     def hash_project_dir(cls, project_dir: Path) -> str:

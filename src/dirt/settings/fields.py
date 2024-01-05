@@ -38,10 +38,10 @@ subparsers = simple_parsing.helpers.fields.subparsers
 flag = simple_parsing.helpers.fields.flag
 
 
-def arg_path_type(
+def ResolvedPath(
     ensure_path: Literal["exists", "dir", "file"] | None = None
 ) -> Callable[[str], Path]:
-    def path_type(value: str) -> Path:
+    def resolve_path(value: str) -> Path:
         path_val: Path
         if isinstance(value, str):
             if not value:
@@ -76,8 +76,8 @@ def arg_path_type(
 
         raise ArgumentTypeError(f"Unknown {ensure_path=} for Path type")
 
-    path_type.__name__ = "Path"
-    return path_type
+    resolve_path.__name__ = "Path"
+    return resolve_path
 
 
 _file_path_defaults = dict(init=True, repr=True, hash=True, compare=True)
@@ -141,7 +141,7 @@ def file_path(
             kwargs[key] = val
 
     if type is None:
-        type = arg_path_type(ensure_path)
+        type = ResolvedPath(ensure_path)
 
     return field(
         default=default,

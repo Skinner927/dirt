@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import types
 from pathlib import Path
 from typing import Final, Mapping, Tuple
 
 # TODO: Add doc strings to all these
+
+# == PYTHON VERSION CHECK ====================================================
+PY_GE_39: Final[bool] = sys.version_info >= (3, 9)
+PY_GE_310: Final[bool] = sys.version_info >= (3, 10)
 
 # == CONST STRINGS ============================================================
 DIRT_INI_FNAMES: Final[Tuple[str, ...]] = ("dirt.ini", ".dirt.ini")

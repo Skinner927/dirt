@@ -16,7 +16,7 @@ from simple_parsing import (
 )
 
 
-class StupidHelpFormatter(SimpleHelpFormatter):
+class TailoredHelpFormatter(SimpleHelpFormatter):
     def _get_help_string(self, action: argparse.Action) -> Optional[str]:
         # Don't include (default: %(default)s) for boolean flags
         if 0 == action.nargs:
@@ -40,7 +40,7 @@ class DirtArgParser(ArgumentParser):
         argument_generation_mode=ArgumentGenerationMode.FLAT,
         nested_mode: NestedMode = NestedMode.DEFAULT,
         # Was simple_parsing.SimpleHelpFormatter
-        formatter_class: type[HelpFormatter] = StupidHelpFormatter,
+        formatter_class: type[HelpFormatter] = TailoredHelpFormatter,
         add_config_path_arg: bool | None = None,
         config_path: Path | str | Sequence[Path | str] | None = None,
         add_dest_to_option_strings: bool | None = None,

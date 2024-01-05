@@ -20,6 +20,7 @@ from typing import (
     cast,
 )
 
+import dirt.session
 import dirt.settings
 import dirt.settings.parsing
 import dirt.utils
@@ -34,14 +35,16 @@ logger = logging.getLogger(__name__)
 
 def _parse_core_options() -> Tuple[CoreOptions, DirtArgParser]:
     parser = DirtArgParser()
-    parser.add_arguments(CoreOptions, dest=CoreOptions.key_, prefix="")
+    parser.add_arguments(CoreOptions, dest=CoreOptions.key_)
     known_args, _ = parser.parse_known_args()
     core_settings: CoreOptions = getattr(known_args, CoreOptions.key_)
     return core_settings, parser
 
+
 def _find_root_dirt_ini(origin: Path, core_options: CoreOptions) -> Path:
     """Return the resolved `dirt.ini` file or raise `FileNotFoundError`."""
     if core_options.config:
+        # TODO: No need to do this because our type=arg_path_type does it
         # User passed a config file path, ensure it's legit
         try:
             return Path(core_options.config).resolve(strict=True)
@@ -71,66 +74,31 @@ def bootstrap() -> None:
     4. Create, re-create, or use existing virtualenv (venv) by hashing `tasks_package` for changes.
     5. If
     """
-    origin = Path(os.getcwd()).resolve()
-    core_options, parser = _parse_core_options()
-    try:
-        # Find the ini file to use
-        dirt_ini = _find_root_dirt_ini(origin, core_options)
-        print(f"Done: {dirt_ini}")
-    finally:
-        if core_options.help:
-            parser.print_help()
-        print(f"{core_options}")
-    return
-
     # TODO: Use prefix= to segment options
     # TODO: Figure out how to incorporate env and config files?
     # TODO: ENV variables like this: DIRT_CONF_0='--foo bar -vvv'
-
-    # Find dirt.ini
-
-    dirt_ini_file_path: Path
-    if args.config:
-        logger.debug("Bootstrapping with --config %s", args.config)
-        dirt_ini_file_path = Path(args.config).resolve()
-        if not dirt_ini_file_path.is_file():
-            raise RuntimeError(f"Specified config {dirt_ini_file_path} is not a file")
-    else:
-        logger.debug("Bootstrapping from dir %s", origin)
-        for file in dirt.utils.fs.find(
-            origin, _DIRT_INI_FNAMES_RE, down=False, kind="file"
-        ):
-            dirt_ini_file_path = file
-            break
-        else:
-            raise RuntimeError(
-                f"Could not find {const.DIRT_INI_FNAMES} files "
-                f"in {origin} and all parent directories"
-            )
-        logger.debug("Found dirt.ini file %s", dirt_ini_file_path)
-
     # TODO: Make .gitignore if not exists? Need to consider tasks_package
-    # Make .dirt/
-    dirt_dir = dirt_ini_file_path.parent / const.DOT_DIRT_NAME
-    dirt_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read ini for tasks_project
-    ini = IniParser(dirt_ini_file_path)
-    tasks_project = ini.dirt_tasks_project(const.DEFAULT_TASKS_PROJECT)
-    tasks_main = ini.dirt_tasks_main(const.DEFAULT_TASKS_MAIN)
+    origin = Path(os.getcwd()).resolve()
+    opts, parser = _parse_core_options()
+    try:
+        # TODO: Merge user's overrides
+        # Find the ini file to use
+        dirt_ini = _find_root_dirt_ini(origin, opts)
+        logger.debug("Found dirt.ini file %s", dirt_ini)
 
-    # try:
-    #     tasks_project_path = Path(tasks_project).resolve(strict=True)
-    #     if tasks_project_path.is_dir() or (tasks_project_path.is_file() and )
+        # Read ini for tasks_project
+        session = dirt.session.Session(origin=origin, dirt_ini=dirt_ini)
+        tasks_project = session.ini.dirt_tasks_project()
+        tasks_main = session.ini.dirt_tasks_main()
 
-    # Make .dirt/venv
-    venv_path = dirt_dir / const.VENV_DIR_NAME
-    venv_path.mkdir(parents=True, exist_ok=True)
-
-    # Make venv at .dirt/venv/main
-    main_venv = venv_path / "main"
-
-    venv_is_new = not venv_path.exists()
+    except Exception:
+        # Print help if there was an error (meaning dirt.cli wasn't able to
+        # parse --help)
+        if opts.help:
+            parser.print_help(sys.stdout)
+            print("\n")
+        raise
 
 
 class Bootstrapper:
