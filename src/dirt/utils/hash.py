@@ -1,19 +1,40 @@
-"""Hashing utilities."""
+"""Hashing utilities.
+
+**Table of Contents**
+
+- `hashlib_new()`: Forwards compatible wrapper around `hashlib.new()`.
+- `hash_file()`: Hash a single file.
+- `hash_iterable_file_contents()`: Hash a sequence of files.
+- `hash_update_open_binary_file()`: Update HASH with an open binary file.
+"""
 from __future__ import annotations
 
 import concurrent.futures
 import functools
 import hashlib
 import io
-import itertools
 import logging
 import os
 import threading
 from pathlib import Path
-from typing import BinaryIO, ClassVar, List, Optional, Protocol, Tuple
+from typing import BinaryIO, Final, Iterable, Optional, Protocol, Tuple, Union
 
 from dirt import const
-from dirt.utils.fs import find
+
+__all__ = [
+    "BLAKE2_FOR_ARCH",
+    "HASH",
+    "hashlib_new",
+    "hash_file",
+    "hash_iterable_file_contents",
+    "hash_update_open_binary_file",
+]
+
+
+BUFFER_SIZE: int = 2**18
+DEFAULT_ALGO: str = "md5"
+BLAKE2_FOR_ARCH: Final[str] = "blake2b" if const.IS_64bit else "blake2s"
+logger = logging.getLogger(__name__)
 
 
 class HASH(Protocol):
@@ -28,21 +49,16 @@ class HASH(Protocol):
         ...
 
 
-class InvalidHashError(Exception):
-    pass
-
-
 # Forward compat
-def hashlib_new(algo: str, usedforsecurity: bool = True) -> "HASH":
+def hashlib_new(
+    algo: str = DEFAULT_ALGO, data: bytes = b"", usedforsecurity: bool = True, **kwargs
+) -> "HASH":
     if const.PY_GE_39:
-        return hashlib.new(algo, usedforsecurity=usedforsecurity)  # type: ignore
-    return hashlib.new(algo)
+        return hashlib.new(algo, data, usedforsecurity=usedforsecurity, **kwargs)  # type: ignore
+    return hashlib.new(algo, data, **kwargs)
 
 
-logger = logging.getLogger(__name__)
-
-
-def hash_file_digest(
+def hash_update_open_binary_file(
     file: BinaryIO | io.BytesIO | io.BufferedIOBase,
     hash_obj: HASH,
     buffer: bytearray,
@@ -85,156 +101,137 @@ def hash_file_digest(
 
 
 def hash_file(
-    path: Path,
-    buffer_size: int = 2**18,
+    path: Union[str, os.PathLike[str]],
     buffer: Optional[bytearray] = None,
     view: Optional[memoryview] = None,
-    add_path_to_hash: bool = False,
-    algo: str = "md5",
+    hash_file_path: bool = True,
+    hash_obj_or_name: str | HASH = DEFAULT_ALGO,
 ) -> str:
-    # Copied Py3.11 hashlib.file_digest()
-    # https://github.com/python/cpython/blob/0b13575e74ff3321364a3389eda6b4e92792afe1/Lib/hashlib.py3
-    # binary file, socket.SocketIO object
-    # Note: socket I/O uses different syscalls than file I/O.
-
+    """Hash a single file."""
     # Ensure path is absolute
-    path = path.absolute()
+    path = Path(path).resolve(strict=True)
 
     if buffer is None:
-        buffer = bytearray(buffer_size)
+        buffer = bytearray(BUFFER_SIZE)
     if view is None:
         view = memoryview(buffer)
 
-    digest = hashlib_new(algo, usedforsecurity=False)
-    if add_path_to_hash:
+    if isinstance(hash_obj_or_name, str):
+        digest = hashlib_new(hash_obj_or_name, usedforsecurity=False)
+    else:
+        digest = hash_obj_or_name
+
+    if hash_file_path:
         # Start digest with file name
         digest.update(str(path).encode("utf-8"))
 
     with path.open("rb") as fb:
-        hash_file_digest(fb, hash_obj=digest, buffer=buffer, view=view)
+        hash_update_open_binary_file(fb, hash_obj=digest, buffer=buffer, view=view)
     return digest.hexdigest()
 
 
-class HashPath:
-    """Hash a file or directory.
-
-    Use `hash_filenames()` and `hash_contents()` to retrieve hex digests, with
-    `hash_filenames()` being a less-expensive option.
-
-    When the HashPath object is created, a list of all files in the given path is
-    cached, which means `hash_filenames()` will never change and `hash_contents()` will
-    only hash the files that existed when HashPath was created.
-
-    The results from `hash_*` functions are cached so multiple calls will not change and
-    are not expensive.
-    """
-
-    _hash_name: ClassVar[str] = "md5"
-
-    def __init__(self, path: Path, buffer_size: int = 2**18) -> None:
-        if not path.is_file() and not path.is_dir():
-            raise OSError(f"{path} is not a file or directory")
-
-        self._path = path.resolve()
-        self._scratch_buffer_size = buffer_size
-        """Scratch buffer size for reading files for hashing.
-
-        Value comes from `hashlib.file_digest()`.
-        """
-        self._sorted_filenames = self._get_sorted_filenames(self._path)
-
-    @property
-    def path(self) -> Path:
-        return self._path
-
-    @functools.lru_cache(None)
-    def hash_filenames(self) -> str:
-        """Hash of all the file names in the path.
-
-        This is faster, but not as thorough as `hash_contents()`. This does not check
-        file contents, just all the file names.
-        """
-        digest = self._new_hash()
-        for item in self._sorted_filenames:
-            digest.update(item.encode("utf-8"))
-        return digest.hexdigest()
-
-    @functools.lru_cache(None)
-    def hash_contents(self) -> str:
-        """Hash all files and their contents in the path.
-
-        This is slower, but more thorough than `hash_filenames()`.
-        """
-        # Hash everything with worker threads
-        # Similar to how ThreadPoolExecutor does it except we max at 12 not 32
-        max_workers = min(12, (os.cpu_count() or 1) + 4)
-        hash_sum = self._new_hash()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for file_digest in pool.map(
-                self._hash_contents_pool_worker,
-                self._sorted_filenames,
-                itertools.repeat(self._scratch_buffer_size),
-            ):
-                hash_sum.update(file_digest)
-        return hash_sum.hexdigest()
-
-    @classmethod
-    def _hash_contents_pool_worker(cls, file_name: str, buffer_size: int) -> bytes:
-        """Worker for hash_contents()."""
+def _hash_contents_pool_worker(
+    file_name: os.PathLike[str] | str,
+    *,
+    prefix_content_with_path: bool,
+    algo: str = DEFAULT_ALGO,
+) -> Tuple[str, Union[bytes, Exception]]:
+    """Worker for hash_iterable_file_contents()."""
+    file_name = str(file_name)
+    try:
         tls = threading.local()
         # Init
         buf_view: Tuple[bytearray, memoryview]
         try:
             buf_view = tls.hash_file_buffer
         except AttributeError:
-            _buffer = bytearray(buffer_size)
+            _buffer = bytearray(BUFFER_SIZE)
             buf_view = _buffer, memoryview(_buffer)
             tls.hash_file_buffer = buf_view
 
         buffer, view = buf_view
 
-        digest = cls._new_hash()
+        digest = hashlib_new(algo, usedforsecurity=False)
         with open(file_name, "rb") as fb:
             # Add filename first
-            digest.update(str(file_name).encode("utf-8"))
+            if prefix_content_with_path:
+                digest.update(file_name.encode("utf-8"))
             # Then add file contents
-            hash_file_digest(fb, hash_obj=digest, buffer=buffer, view=view)
-        return digest.digest()
+            hash_update_open_binary_file(fb, hash_obj=digest, buffer=buffer, view=view)
+        return file_name, digest.digest()
+    except Exception as e:
+        return file_name, e
 
-    @classmethod
-    def _new_hash(cls) -> HASH:
-        # over-engineered
-        while cls._hash_name is None:
-            failed_algo = set()
-            # Prefer MD5
-            for name in itertools.chain(("md5",), hashlib.algorithms_guaranteed):
-                try:
-                    hash_obj = hashlib_new(name, usedforsecurity=False)
-                    cls._hash_name = name
-                    return hash_obj
-                except Exception as e:
-                    failed_algo.add((name, str(e)))
-            # how??
-            raise RuntimeError(f"Failed to find working hash algorithms: {failed_algo}")
-        return hashlib_new(cls._hash_name, usedforsecurity=False)
 
-    @staticmethod
-    def _get_sorted_filenames(origin: Path, skip_hidden: bool = True) -> List[str]:
-        """Return sorted list of all filenames in path.
+def hash_iterable_file_contents(
+    files: Iterable[os.PathLike[str] | str],
+    hash_obj_or_name: str | HASH,
+    *,
+    sort_files: bool = True,
+    hash_file_paths: bool = True,
+    max_workers: int = 12,
+    ignore_file_errors: bool = True,
+) -> Tuple[HASH, int]:
+    """Hash all file contents in the given iterable.
 
-        Names are sorted to ensure no changes.
-        """
-        if origin.is_file():
-            return [str(origin)]
-        else:
-            return sorted(
-                set(
-                    str(p.resolve())
-                    for p in find(
-                        origin,
-                        kind="file",
-                        skip_hidden_file=skip_hidden,
-                        skip_hidden_dir=skip_hidden,
-                    )
-                )
+    :param files: Paths to files to hash. Paths should be absolute, but not required.
+    :param hash_obj_or_name:
+    :param sort_files: False if files are already sorted or order should be preserved.
+    :param hash_file_paths: Include the file paths in the hashes.
+    :param max_workers:
+    :param ignore_file_errors: If True, skip files that cause errors; such as files that
+        don't exist and files we don't have permission to read.
+    :return: Hash object, Number of files hashed
+    """
+    my_logger = logger.getChild(hash_iterable_file_contents.__name__)
+    if isinstance(hash_obj_or_name, str):
+        hash_obj = hashlib_new(hash_obj_or_name, usedforsecurity=False)
+    else:
+        hash_obj = hash_obj_or_name
+
+    # Always convert to str
+    str_files: Iterable[str] = (str(f) for f in files)
+    if sort_files:
+        str_files = sorted(str_files)
+    max_workers = min(max_workers, (os.cpu_count() or 1) + 4)
+
+    # Faster with 1 file (only works with list, tuple, etc.)
+    try:
+        num_files = len(str_files)  # type: ignore
+    except Exception:
+        num_files = -1
+    if 0 == num_files:
+        return hash_obj, 0
+    elif 1 == num_files:
+        try:
+            hash_file(
+                str_files[0],  # type: ignore
+                hash_file_path=hash_file_paths,
+                hash_obj_or_name=hash_obj,
             )
+            return hash_obj, 1
+        except Exception:
+            # Do it the regular way
+            pass
+
+    # worker function
+    worker = functools.partial(
+        _hash_contents_pool_worker,
+        hash_file_paths=hash_file_paths,
+    )
+
+    num_files = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        file_name: str
+        digest_or_err: Union[bytes, Exception]
+        for file_name, digest_or_err in pool.map(worker, str_files):
+            if isinstance(digest_or_err, Exception):
+                if ignore_file_errors:
+                    my_logger.debug(
+                        "Ignored file error %s: %s", file_name, digest_or_err
+                    )
+                    continue
+                raise digest_or_err
+            num_files += 1
+            hash_obj.update(digest_or_err)
+    return hash_obj, num_files

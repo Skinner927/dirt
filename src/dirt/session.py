@@ -1,42 +1,144 @@
 from __future__ import annotations
 
+import abc
 import hashlib
 import logging
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
-from typing import ClassVar, List, Optional, Sequence, Tuple, TypeVar, cast
+from typing import ClassVar, List, Optional, Protocol, Sequence, Tuple, TypeVar, cast
+
+import nox.virtualenv
 
 from dirt import const
 from dirt.ini_parser import IniParser
-from dirt.utils import fix
+from dirt.utils import fix, fs, hash
+
+__all__ = ["PKG_FILES", "ExecutionEnv", "VirtualEnv", "Session"]
 
 T = TypeVar("T")
+
+PKG_FILES: Tuple[str, ...] = (
+    "setup.py",
+    "setup.cfg",
+    "pyproject.toml",
+    # "requirements.txt",
+    "MANIFEST.in",
+)
+
+AZ09_RE = re.compile("[^a-zA-Z0-9_]")
+logger = logging.getLogger(__name__)
+
+
+class ExecutionEnv(Protocol):
+    is_sandboxed: bool = False
+
+    def run(self, *args: str | os.PathLike[str]) -> None:
+        raise NotImplementedError()
+
+
+class VirtualEnv(nox.virtualenv.VirtualEnv):
+    def __init__(
+        self,
+        venv_dir: Path,
+        interpreter: str | None = None,
+        reuse_existing: bool = True,
+    ) -> None:
+        super().__init__(
+            str(venv_dir),
+            interpreter=interpreter,
+            reuse_existing=reuse_existing,
+            venv=True,
+        )
+        self.is_created: bool = False
+
+    @staticmethod
+    def venv_id_for_project(project: Path) -> str:
+        """Create the venv name for a project based on the files hashed within.
+
+        The ID will change for the same path if the files within change.
+
+        :param project:
+        :return:
+        """
+        # Use BLAKE2 because we can set a small digest size;
+        # it's a real digest, not a truncation.
+        content_hash = hash.hashlib_new(
+            hash.BLAKE2_FOR_ARCH, usedforsecurity=False, digest_size=8
+        )
+        # Get the files we possibly, maybe, think, would mark that the project has changed.
+        sorted_filenames = sorted(
+            f for f in (project / name for name in PKG_FILES) if f.is_file()
+        )
+        _, num_files = hash.hash_iterable_file_contents(
+            sorted_filenames, content_hash, sort_files=False
+        )
+        if 0 == num_files:
+            # If no files hashed, just hash all files in the project's root.
+            logger.info(
+                "Failed to find PKG_FILES for %s, using all files in dir", project
+            )
+            hash.hash_iterable_file_contents(
+                (f for f in project.iterdir() if f.is_file()),
+                content_hash,
+                sort_files=True,
+            )
+        digest = content_hash.hexdigest()
+        short_name = AZ09_RE.sub(project.name, "")[:16]
+        venv_id = f"{short_name}-{digest}"
+        return venv_id
+
+    def _clean_location(self) -> bool:
+        """Delete any existing virtual environment.
+
+        Functionally the same as super() but removes _ENABLE_STALENESS_CHECK check.
+        """
+        if os.path.exists(self.location):
+            if self.reuse_existing:
+                return False
+            if (
+                self.reuse_existing
+                and self._check_reused_environment_type()
+                and self._check_reused_environment_interpreter()
+            ):
+                return False
+            else:
+                shutil.rmtree(self.location)
+        return True
+
+    def create(self) -> bool:
+        if not self.is_created:
+            with fs.chdir(os.path.dirname(self.location)):
+                # chdir is likely not needed but let's make sure if anything
+                # goes nuts, it's inside the venv dir's parent.
+                self.is_created = super().create()
+        return self.is_created
+
+    def run(self, *args: str | os.PathLike[str]) -> subprocess.CompletedProcess:
+        cmd, pos = args[0], args[1:]
+        full_cmd = shutil.which(cmd, path=os.pathsep.join(self.bin_paths))
+        if not full_cmd:
+            full_cmd = shutil.which(cmd)
+            if not full_cmd:
+                raise RuntimeError(f"Could not find full path to {cmd}")
+        return subprocess.run([full_cmd, *pos])
 
 
 class Session:
     def __init__(self, *, origin: Path, dirt_ini: Path) -> None:
-        self.origin = origin
-        self.dirt_ini = dirt_ini.resolve(True)
-        self.ini = IniParser(self.dirt_ini)
+        """Create a Session and its virtual env.
 
-    @fix.cached_property
-    def dirt_dir(self) -> Path:
-        # Make .dirt/ relative to dirt.ini
-        dirt_dir = self.dirt_ini.parent / const.DOT_DIRT_NAME
-        dirt_dir.mkdir(parents=True, exist_ok=True)
-        return dirt_dir
-
-    @fix.cached_property
-    def venv_dir(self) -> Path:
-        # Make .dirt/venv
-        venv_dir = self.dirt_dir / const.VENV_DIR_NAME
-        venv_dir.mkdir(parents=True, exist_ok=True)
-        return venv_dir
+        :param origin: Directory dirt was invoked from.
+        :param dirt_ini: Path to resolved dirt.ini
+        """
+        self.ini = IniParser(dirt_ini, origin)
 
 
-class Runner:
+# TODO: RM me
+class xxRunner:
     PY_REQUIREMENT_FILES: ClassVar[Tuple[str, ...]] = (
         "setup.py",
         "setup.cfg",

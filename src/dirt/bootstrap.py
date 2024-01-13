@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import (
     ClassVar,
     Collection,
+    Final,
     List,
     Literal,
     Optional,
@@ -24,12 +25,12 @@ import dirt.session
 import dirt.settings
 import dirt.settings.parsing
 import dirt.utils
-import dirt.utils.fs
 from dirt import const
 from dirt.ini_parser import IniParser
 from dirt.settings.options import CoreOptions
 from dirt.settings.parsing import DirtArgParser
 
+PY_VERSION: Final[str] = ".".join(str(x) for x in sys.version_info[:2])
 logger = logging.getLogger(__name__)
 
 
@@ -64,7 +65,7 @@ def _find_root_dirt_ini(origin: Path, core_options: CoreOptions) -> Path:
         )
 
 
-def bootstrap() -> None:
+def bootstrap() -> int:
     """Entrypoint for Dirt when invoked directly.
 
     1. Find dirt.ini or use --config argument.
@@ -87,20 +88,65 @@ def bootstrap() -> None:
         dirt_ini = _find_root_dirt_ini(origin, opts)
         logger.debug("Found dirt.ini file %s", dirt_ini)
 
-        # Read ini for tasks_project
-        session = dirt.session.Session(origin=origin, dirt_ini=dirt_ini)
-        tasks_project = session.ini.dirt_tasks_project()
-        tasks_main = session.ini.dirt_tasks_main()
+        # Read dirt.ini and extract needed config
+        ini = IniParser(dirt_ini, origin)
+        project_path = ini.dirt_tasks_project()
+        tasks_main_str = ini.dirt_tasks_main()
+        # TODO: Will actually want this at some point. Can parse from setup.py?
+        #  at worse dirt.ini
+        py_version = PY_VERSION
+
+        # Build the main virtualenv
+        # TODO: Need to figure how to clean up old venvs
+        project_venv_id = dirt.session.VirtualEnv.venv_id_for_project(project_path)
+        project_venv_dir = ini.venv_dir / project_venv_id
+        venv_is_new = not project_venv_dir.exists()
+        venv = dirt.session.VirtualEnv(project_venv_dir, interpreter=py_version)
+        # Pass dirt.ini and origin to all venv invocations
+        # venv.env also already contains venv.bin_paths.
+        venv.env[const.ENV_DIRT_INI_FILE] = str(dirt_ini)
+        venv.env[const.ENV_DIRT_ORIGIN] = str(origin)
+        if not venv.create():
+            raise RuntimeError(f"Failed to create project venv: {project_venv_dir}")
+
+        python = dirt.utils.cmd.which("python", paths=venv.bin_paths)
+        cwd = str(dirt_ini.parent)
+        # Install the project if new venv
+        if venv_is_new:
+            dirt.utils.out.print(
+                f"Installing tasks project to primary virtualenv: {project_path}"
+            )
+            subprocess.run(
+                [python, "-m", "pip", "install", "-e", str(project_path)],
+                env=venv.env,
+                cwd=cwd,
+            )
+        # Run
+        if os.path.isfile(tasks_main_str):
+            subprocess.run([python, tasks_main_str], env=venv.env, cwd=cwd)
+        else:
+            subprocess.run([python, "-m", tasks_main_str], env=venv.env, cwd=cwd)
 
     except Exception:
         # Print help if there was an error (meaning dirt.cli wasn't able to
         # parse --help)
         if opts.help:
+            # TODO: how flush logger?
+            logger.error("Unhandled error; stacktrace will be printed after help")
+            sys.stderr.flush()
+            sys.stdout.flush()
+
             parser.print_help(sys.stdout)
             print("\n")
-        raise
+            sys.stdout.flush()
+
+        logger.exception("Unexpected fatal error")
+        return 1
+
+    return 0  # success
 
 
+# TODO: This isn't used.
 class Bootstrapper:
     """Entry point for Dirt.
 

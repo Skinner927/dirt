@@ -1,13 +1,14 @@
 import logging
+import sys
 
 from dirt import bootstrap, const
 
 
-def main():
+def main() -> None:
     logging.basicConfig(level=const.LOG_LEVEL_GLOBAL)
     root = logging.getLogger("dirt")  # because __main__ doesn't look good :D
     root.setLevel(const.LOG_LEVEL_DIRT)
-    bootstrap.bootstrap()
+    sys.exit(bootstrap.bootstrap())
 
 
 if __name__ == "__main__":

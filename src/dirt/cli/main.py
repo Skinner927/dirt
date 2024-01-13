@@ -37,5 +37,5 @@ def main() -> None:
     dirt_logger.setLevel(dirt_ll)
 
     # Create and start the runner
-    runner = dirt.session.Runner.bootstrap(name=_NAME)
+    runner = dirt.session.xxRunner.bootstrap(name=_NAME)
     runner.run()

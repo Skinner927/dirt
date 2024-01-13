@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from typing import Callable, Generic, Optional, Type, TypeVar, Union, cast, overload
 
+from typing_extensions import Self
+
+T = TypeVar("T")
+R = TypeVar("R")
 _NOT_FOUND = object()
 
 
-class cached_property:
+class cached_property(Generic[T, R]):
     """`functools.cached_property` without locks.
 
     Simple "backport" of perf improved cached_property in 3.12.
@@ -19,12 +24,12 @@ class cached_property:
     :return:
     """
 
-    def __init__(self, func):
+    def __init__(self, func: Callable[[T], R]) -> None:
         self.func = func
-        self.attrname = None
+        self.attrname: Optional[str] = None
         self.__doc__ = func.__doc__
 
-    def __set_name__(self, owner, name):
+    def __set_name__(self, owner: Type[T], name: str) -> None:
         if self.attrname is None:
             self.attrname = name
         elif name != self.attrname:
@@ -33,15 +38,26 @@ class cached_property:
                 f"({self.attrname!r} and {name!r})."
             )
 
-    def __get__(self, instance, owner=None):
+    @overload
+    def __get__(self, instance: T, owner: None = None) -> Self:
+        ...
+
+    @overload
+    def __get__(self, instance: T, owner: Type[T]) -> R:
+        ...
+
+    def __get__(self, instance: T, owner: Optional[Type[T]] = None) -> Union[Self, R]:
         if instance is None:
             return self
         if self.attrname is None:
             raise TypeError(
-                "Cannot use cached_property instance without calling __set_name__ on it.")
+                "Cannot use cached_property instance without calling __set_name__ on it."
+            )
         try:
             cache = instance.__dict__
-        except AttributeError:  # not all objects have __dict__ (e.g. class defines slots)
+        except (
+            AttributeError
+        ):  # not all objects have __dict__ (e.g. class defines slots)
             msg = (
                 f"No '__dict__' attribute on {type(instance).__name__!r} "
                 f"instance to cache {self.attrname!r} property."
@@ -58,4 +74,4 @@ class cached_property:
                     f"does not support item assignment for caching {self.attrname!r} property."
                 )
                 raise TypeError(msg) from None
-        return val
+        return cast(R, val)

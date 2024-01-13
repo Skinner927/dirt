@@ -1,11 +1,14 @@
 """Filesystem utility functions."""
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 from pathlib import Path
-from typing import Generator, List, Literal, Optional, Set, Union, Iterable
+from typing import Generator, Iterable, List, Literal, Optional, Set, Union
 
 find_kind_t = Literal["file", "dir", "symlink", "fifo"]
+
 
 def walk_up_find(
     filenames: Iterable[str], start: Optional[Path] = None
@@ -25,6 +28,7 @@ def walk_up_find(
             if p.is_file():
                 return p.resolve()
     return None
+
 
 # TODO: Would be cool if find could return a special type that is Iterable
 #   but also has a .first() property to get the first item or None.
@@ -142,3 +146,17 @@ def find(
             current = parent
 
     return None
+
+
+@contextlib.contextmanager
+def chdir(path: str | os.PathLike) -> Generator[None, None, None]:
+    """Context manager to change the current directory to the given path.
+
+    Follows python 3.11's chdir behaviour.
+    """
+    cwd = os.getcwd()
+    try:
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(cwd)
