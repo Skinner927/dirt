@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import abc
 import hashlib
 import logging
 import os
@@ -9,13 +8,23 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import ClassVar, List, Optional, Protocol, Sequence, Tuple, TypeVar, cast
+from typing import (
+    IO,
+    ClassVar,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    TypeVar,
+    cast,
+)
 
+import nox.command
 import nox.virtualenv
 
-from dirt import const
 from dirt.ini_parser import IniParser
-from dirt.utils import fix, fs, hash
+from dirt.utils import hash
 
 __all__ = ["PKG_FILES", "ExecutionEnv", "VirtualEnv", "Session"]
 
@@ -53,7 +62,6 @@ class VirtualEnv(nox.virtualenv.VirtualEnv):
             reuse_existing=reuse_existing,
             venv=True,
         )
-        self.is_created: bool = False
 
     @staticmethod
     def venv_id_for_project(project: Path) -> str:
@@ -87,7 +95,7 @@ class VirtualEnv(nox.virtualenv.VirtualEnv):
                 sort_files=True,
             )
         digest = content_hash.hexdigest()
-        short_name = AZ09_RE.sub(project.name, "")[:16]
+        short_name = AZ09_RE.sub("x", project.name)[:16]
         venv_id = f"{short_name}-{digest}"
         return venv_id
 
@@ -97,8 +105,6 @@ class VirtualEnv(nox.virtualenv.VirtualEnv):
         Functionally the same as super() but removes _ENABLE_STALENESS_CHECK check.
         """
         if os.path.exists(self.location):
-            if self.reuse_existing:
-                return False
             if (
                 self.reuse_existing
                 and self._check_reused_environment_type()
@@ -109,22 +115,48 @@ class VirtualEnv(nox.virtualenv.VirtualEnv):
                 shutil.rmtree(self.location)
         return True
 
-    def create(self) -> bool:
-        if not self.is_created:
-            with fs.chdir(os.path.dirname(self.location)):
-                # chdir is likely not needed but let's make sure if anything
-                # goes nuts, it's inside the venv dir's parent.
-                self.is_created = super().create()
-        return self.is_created
+    def xx_create(self) -> bool:
+        """Create the virtualenv or venv."""
+        # Copy of super's create(), all to get run output.
+        if not self._clean_location():
+            logger.debug(
+                f"Re-using existing virtual environment at {self.location_name}."
+            )
 
-    def run(self, *args: str | os.PathLike[str]) -> subprocess.CompletedProcess:
-        cmd, pos = args[0], args[1:]
-        full_cmd = shutil.which(cmd, path=os.pathsep.join(self.bin_paths))
-        if not full_cmd:
-            full_cmd = shutil.which(cmd)
-            if not full_cmd:
-                raise RuntimeError(f"Could not find full path to {cmd}")
-        return subprocess.run([full_cmd, *pos])
+            self._reused = True
+
+            return False
+
+        if self.venv_or_virtualenv == "virtualenv":
+            cmd = [sys.executable, "-m", "virtualenv", self.location]
+            if self.interpreter:
+                cmd.extend(["-p", self._resolved_interpreter])
+        else:
+            cmd = [self._resolved_interpreter, "-m", "venv", self.location]
+        cmd.extend(self.venv_params)
+
+        resolved_interpreter_name = os.path.basename(self._resolved_interpreter)
+
+        logger.info(
+            f"Creating virtual environment ({self.venv_or_virtualenv}) using"
+            f" {resolved_interpreter_name} in {self.location_name}"
+        )
+        nox.command.run(
+            cmd,
+            silent=True,
+            log=True,
+        )
+
+        return True
+
+    # def run(self, *args: str | os.PathLike[str]) -> subprocess.CompletedProcess:
+    #     cmd, pos = args[0], args[1:]
+    #     full_cmd = shutil.which(cmd, path=os.pathsep.join(self.bin_paths))
+    #     if not full_cmd:
+    #         full_cmd = shutil.which(cmd)
+    #         if not full_cmd:
+    #             raise RuntimeError(f"Could not find full path to {cmd}")
+    #     return subprocess.run([full_cmd, *pos])
 
 
 class Session:

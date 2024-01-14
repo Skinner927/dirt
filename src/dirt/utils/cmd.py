@@ -30,15 +30,16 @@ def which(cmd: str | os.PathLike[str], paths: Optional[Sequence[str]] = None) ->
     :return:
     """
     # DO NOT RESOLVE PATHS. Preserving symlinks is potentially important.
+    # Using abs instead of resolve.
     try:
         if not cmd:
             raise ValueError("Command is empty")
         cmd = str(cmd)
         if paths:
             if full := shutil.which(cmd, path=os.pathsep.join(paths)):
-                return os.fspath(full)
+                return os.path.abspath(os.fspath(full))
         if full := shutil.which(cmd):
-            return os.fspath(full)
+            return os.path.abspath(os.fspath(full))
     except Exception as e:
         raise CommandNotFound(f"Failed to find command {cmd}", command=str(cmd)) from e
     raise CommandNotFound(f"Failed to find command {cmd}", command=cmd)

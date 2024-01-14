@@ -14,6 +14,7 @@ from typing import Any, Final, Mapping, Tuple
 PY_GE_39: Final[bool] = sys.version_info >= (3, 9)
 PY_GE_310: Final[bool] = sys.version_info >= (3, 10)
 IS_64bit: Final[bool] = 8 == struct.calcsize("P")
+IS_DEV: Final[bool] = (Path(__file__).parent / ".is-dev").is_file()
 
 # == CONST STRINGS ============================================================
 DIRT_INI_FNAMES: Final[Tuple[str, ...]] = ("dirt.ini", ".dirt.ini")
@@ -40,7 +41,7 @@ DEFAULT_PROG_NAME_SNAKE: Final[str] = re.sub(
     r"__+", "_", re.sub(r"[^a-zA-Z0-9_]", "_", DEFAULT_PROG_NAME.lower())
 )
 DEFAULT_TASKS_PROJECT: Final[str] = "./tasks"
-# DEFAULT_TASKS_MAIN: Final[str] = "tasks"
+DEFAULT_TASKS_MAIN: Final[str] = "tasks"
 
 ARG_PARSE_KWARGS: Final[Mapping[str, Any]] = types.MappingProxyType(
     dict(fromfile_prefix_chars="@", allow_abbrev=False)

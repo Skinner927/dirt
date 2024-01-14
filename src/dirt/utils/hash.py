@@ -217,7 +217,7 @@ def hash_iterable_file_contents(
     # worker function
     worker = functools.partial(
         _hash_contents_pool_worker,
-        hash_file_paths=hash_file_paths,
+        prefix_content_with_path=hash_file_paths,
     )
 
     num_files = 0

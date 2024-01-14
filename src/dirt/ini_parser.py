@@ -4,7 +4,7 @@ import configparser
 import enum
 from os import PathLike
 from pathlib import Path
-from typing import ClassVar, Literal, Optional, Type, TypeVar, Union, overload
+from typing import Any, ClassVar, Literal, Optional, Type, TypeVar, Union, overload
 
 from dirt import const
 from dirt.utils import fix
@@ -29,6 +29,8 @@ class NoVal:
 
 _NO_VAL = NoVal()
 _NO_PATH = Path()
+# rng
+_NO_STRING = "D;qn:QyC$M_7Db_LSagu3nXyQ9d!V#N$1+HEfxwk6z%**C*bzEa#TFr*$}TK"
 
 
 class Sections(str, enum.Enum):
@@ -96,8 +98,27 @@ class IniParser(configparser.ConfigParser):
             venv_dir.mkdir(parents=True, exist_ok=False)
         return venv_dir
 
+    @overload
     def dirt_tasks_project(
         self,
+        *,
+        fallback_path: Union[None, PathLike[str], str] = const.DEFAULT_TASKS_PROJECT,
+        fallback: Union[PathLike[str], str] = _NO_PATH,
+    ) -> Path:
+        ...
+
+    @overload
+    def dirt_tasks_project(
+        self,
+        *,
+        fallback_path: Union[None, PathLike[str], str] = const.DEFAULT_TASKS_PROJECT,
+        fallback: None,
+    ) -> None:
+        ...
+
+    def dirt_tasks_project(
+        self,
+        *,
         fallback_path: Union[None, PathLike[str], str] = const.DEFAULT_TASKS_PROJECT,
         fallback: Union[None, PathLike[str], str] = _NO_PATH,
     ) -> Optional[Path]:
@@ -126,14 +147,24 @@ class IniParser(configparser.ConfigParser):
 
             if isinstance(e, OSError):
                 raise FileNotFoundError(
-                    f"File does not exist/invalid access for '{section}' '{option}' in '{self.filename}'"
+                    f"File does not exist/invalid access for '[{section}]' '{option}' in '{self.filename}'"
                 ) from e
             # Basically wrap all exexceptions with some context
             raise FileNotFoundError(
-                f"Failed to find '{section}' '{option}' in '{self.filename}'"
+                f"Failed to find '[{section}]' '{option}' in '{self.filename}'"
             ) from e
 
-    def dirt_tasks_main(self, default: Union[T, NoVal] = _NO_VAL) -> Union[T, str]:
+    @overload
+    def dirt_tasks_main(self, default: str = const.DEFAULT_TASKS_MAIN) -> str:
+        ...
+
+    @overload
+    def dirt_tasks_main(self, default: None) -> None:
+        ...
+
+    def dirt_tasks_main(
+        self, default: Union[None, str] = const.DEFAULT_TASKS_MAIN
+    ) -> Union[None, str]:
         """From `[dirt]` section, get `tasks_main` value."""
         section, option = self.Options.TASKS_MAIN.value
         try:
@@ -142,7 +173,7 @@ class IniParser(configparser.ConfigParser):
             if not isinstance(default, NoVal):
                 return default
             raise FileNotFoundError(
-                f"Failed to find '{section}' '{option}' in '{self.filename}'"
+                f"Failed to find '[{section}]' '{option}' in '{self.filename}'"
             ) from e
 
     @overload
@@ -153,7 +184,7 @@ class IniParser(configparser.ConfigParser):
         *,
         raise_if_invalid: Literal[False],
         fallback: Union[NoVal, T] = _NO_VAL,
-        **kw,
+        **kw: Any,
     ) -> Union[Path, T, None]:
         ...
 
@@ -165,7 +196,7 @@ class IniParser(configparser.ConfigParser):
         *,
         raise_if_invalid: Literal[True] = True,
         fallback: Union[NoVal, str, PathLike[str]] = _NO_VAL,
-        **kw,
+        **kw: Any,
     ) -> Path:
         ...
 
@@ -176,7 +207,7 @@ class IniParser(configparser.ConfigParser):
         *,
         raise_if_invalid: bool = True,
         fallback: Union[NoVal, T] = _NO_VAL,
-        **kw,
+        **kw: Any,
     ) -> Union[Path, T, None]:
         """Resolve Path from ini file.
 

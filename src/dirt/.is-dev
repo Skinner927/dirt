@@ -1,0 +1,2 @@
+Sentinel file that is not included in built package to determine if we are
+running in production or not.
