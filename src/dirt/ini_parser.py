@@ -4,7 +4,7 @@ import configparser
 import enum
 from os import PathLike
 from pathlib import Path
-from typing import ClassVar, Literal, Type, TypeVar, Union, overload
+from typing import ClassVar, Literal, Optional, Type, TypeVar, Union, overload
 
 from dirt import const
 from dirt.utils import fix
@@ -28,6 +28,7 @@ class NoVal:
 
 
 _NO_VAL = NoVal()
+_NO_PATH = Path()
 
 
 class Sections(str, enum.Enum):
@@ -97,27 +98,37 @@ class IniParser(configparser.ConfigParser):
 
     def dirt_tasks_project(
         self,
-        fallback: Union[T, PathLike[str], str, NoVal] = const.DEFAULT_TASKS_PROJECT,
-    ) -> Union[T, Path]:
-        """tasks_project as a resolved absolute Path."""
+        fallback_path: Union[None, PathLike[str], str] = const.DEFAULT_TASKS_PROJECT,
+        fallback: Union[None, PathLike[str], str] = _NO_PATH,
+    ) -> Optional[Path]:
+        """tasks_project as a resolved absolute Path.
+
+        :param fallback_path: Validated fallback path to use.
+        :param fallback: Will be returned on all errors if specified.
+        :return:
+        """
         section, option = self.Options.TASKS_PROJECT.value
         try:
-            if isinstance(fallback, (PathLike, str, NoVal)):
+            if isinstance(fallback_path, (PathLike, str)):
                 # Pathlike and NoVal raise exceptions if not found
-                return self.get_path(section, option, fallback=fallback)
+                return self.get_path(section, option, fallback=fallback_path)
 
-            # fallback is None or something unexpected so user is probably using
+            # fallback_path is None or something unexpected so user is probably using
             # as a sentinel.
-            try:
-                return self.get_path(section, option)
-            except Exception:
-                return fallback
-        except OSError as e:
-            raise FileNotFoundError(
-                f"File does not exist/invalid access for '{section}' '{option}' in '{self.filename}'"
-            ) from e
+            return self.get_path(section, option)
         except Exception as e:
-            # Basically wrap all exceptions with some context
+            if fallback is None:
+                return None
+            if fallback is not _NO_PATH:
+                if isinstance(fallback, Path):
+                    return fallback
+                return Path(fallback)
+
+            if isinstance(e, OSError):
+                raise FileNotFoundError(
+                    f"File does not exist/invalid access for '{section}' '{option}' in '{self.filename}'"
+                ) from e
+            # Basically wrap all exexceptions with some context
             raise FileNotFoundError(
                 f"Failed to find '{section}' '{option}' in '{self.filename}'"
             ) from e

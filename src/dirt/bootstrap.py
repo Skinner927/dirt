@@ -21,6 +21,8 @@ from typing import (
     cast,
 )
 
+from rich.markup import escape
+
 import dirt.session
 import dirt.settings
 import dirt.settings.parsing
@@ -32,6 +34,13 @@ from dirt.settings.parsing import DirtArgParser
 
 PY_VERSION: Final[str] = ".".join(str(x) for x in sys.version_info[:2])
 logger = logging.getLogger(__name__)
+
+
+class KnownError(RuntimeError):
+    def __init__(self, message: str, as_exception: bool = False) -> None:
+        super().__init__(message)
+        self.message = message
+        self.as_exception = as_exception
 
 
 def _parse_core_options() -> Tuple[CoreOptions, DirtArgParser]:
@@ -101,33 +110,34 @@ def bootstrap() -> int:
         project_venv_id = dirt.session.VirtualEnv.venv_id_for_project(project_path)
         project_venv_dir = ini.venv_dir / project_venv_id
         venv_is_new = not project_venv_dir.exists()
-        venv = dirt.session.VirtualEnv(project_venv_dir, interpreter=py_version)
+        proj_venv = dirt.session.VirtualEnv(project_venv_dir, interpreter=py_version)
         # Pass dirt.ini and origin to all venv invocations
         # venv.env also already contains venv.bin_paths.
-        venv.env[const.ENV_DIRT_INI_FILE] = str(dirt_ini)
-        venv.env[const.ENV_DIRT_ORIGIN] = str(origin)
-        if not venv.create():
-            raise RuntimeError(f"Failed to create project venv: {project_venv_dir}")
+        proj_venv.env[const.ENV_DIRT_INI_FILE] = str(dirt_ini)
+        proj_venv.env[const.ENV_DIRT_ORIGIN] = str(origin)
+        with dirt.utils.out.console.status("[bold green]Creating base virtualenv"):
+            if not proj_venv.create():
+                raise KnownError(f"Failed to create project venv: {project_venv_dir}")
 
-        python = dirt.utils.cmd.which("python", paths=venv.bin_paths)
+        python = dirt.utils.cmd.which("python", paths=proj_venv.bin_paths)
         cwd = str(dirt_ini.parent)
         # Install the project if new venv
         if venv_is_new:
-            dirt.utils.out.print(
-                f"Installing tasks project to primary virtualenv: {project_path}"
-            )
-            subprocess.run(
-                [python, "-m", "pip", "install", "-e", str(project_path)],
-                env=venv.env,
-                cwd=cwd,
-            )
+            with dirt.utils.out.console.status(
+                f"[bold green]Installing tasks project to primary virtualenv: {escape(str(project_path))}"
+            ):
+                subprocess.run(
+                    [python, "-m", "pip", "install", "-e", str(project_path)],
+                    env=proj_venv.env,
+                    cwd=cwd,
+                )
         # Run
         if os.path.isfile(tasks_main_str):
-            subprocess.run([python, tasks_main_str], env=venv.env, cwd=cwd)
+            subprocess.run([python, tasks_main_str], env=proj_venv.env, cwd=cwd)
         else:
-            subprocess.run([python, "-m", tasks_main_str], env=venv.env, cwd=cwd)
+            subprocess.run([python, "-m", tasks_main_str], env=proj_venv.env, cwd=cwd)
 
-    except Exception:
+    except Exception as e:
         # Print help if there was an error (meaning dirt.cli wasn't able to
         # parse --help)
         if opts.help:
@@ -140,7 +150,13 @@ def bootstrap() -> int:
             print("\n")
             sys.stdout.flush()
 
-        logger.exception("Unexpected fatal error")
+        if isinstance(e, KnownError):
+            if e.as_exception:
+                logger.exception(e.message)
+            else:
+                logger.error(e.message)
+        else:
+            logger.exception("Unexpected fatal error")
         return 1
 
     return 0  # success
